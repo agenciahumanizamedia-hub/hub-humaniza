@@ -315,7 +315,27 @@ function addHistory(p,text){p.history.unshift(new Date().toLocaleString('pt-BR')
 
 function send(c,msg){
   if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}
-  window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank');
+ // Verifica se abriu pelo link do cliente
+if (location.hash.startsWith('#cliente=')) {
+  mode = 'client';
+  localStorage.setItem('hubMode', 'client');
+}
+
+// Escuta alterações na URL
+window.addEventListener('hashchange', () => {
+  if (location.hash.startsWith('#cliente=')) {
+    mode = 'client';
+    localStorage.setItem('hubMode', 'client');
+  } else {
+    mode = 'agency';
+    localStorage.setItem('hubMode', 'agency');
+  }
+
+  render();
+});
+
+// Primeira renderização
+render();
 }
 
 function approveStrategic(){
