@@ -1,13 +1,11 @@
 let data = JSON.parse(localStorage.getItem('humanizaHubData') || '{"clients":[]}');
 let selectedClientId = localStorage.getItem('hubSelectedClient') || null;
 let selectedProjectId = localStorage.getItem('hubSelectedProject') || null;
-let mode = localStorage.getItem('hubMode') || 'agency';
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
 function saveAll(){localStorage.setItem('humanizaHubData', JSON.stringify(data))}
 function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'; saveCurrentFields()}
 function closeModals(){document.querySelectorAll('.modal').forEach(m=>m.classList.remove('active'))}
-function setMode(m){saveCurrentFields();mode=m;localStorage.setItem('hubMode',m);render()}
 
 function openClientModal(){
   clientName.value='';
@@ -315,27 +313,7 @@ function addHistory(p,text){p.history.unshift(new Date().toLocaleString('pt-BR')
 
 function send(c,msg){
   if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}
- // Verifica se abriu pelo link do cliente
-if (location.hash.startsWith('#cliente=')) {
-  mode = 'client';
-  localStorage.setItem('hubMode', 'client');
-}
-
-// Escuta alterações na URL
-window.addEventListener('hashchange', () => {
-  if (location.hash.startsWith('#cliente=')) {
-    mode = 'client';
-    localStorage.setItem('hubMode', 'client');
-  } else {
-    mode = 'agency';
-    localStorage.setItem('hubMode', 'agency');
-  }
-
-  render();
-});
-
-// Primeira renderização
-render();
+  window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank');
 }
 
 function approveStrategic(){
@@ -383,56 +361,24 @@ function deleteClient(id){
   data.clients=data.clients.filter(c=>c.id!==id);
   selectedClientId=data.clients[0]?.id||null;
   selectedProjectId=data.clients[0]?.projects[0]?.id||null;
+  localStorage.setItem('hubSelectedClient', selectedClientId || '');
+  localStorage.setItem('hubSelectedProject', selectedProjectId || '');
   saveAll();render();
 }
 
 function copyClientLink(){
   const c=currentClient();
   if(!c)return;
-  const link=location.href.split('#')[0]+'#cliente='+c.id;
+  const link=window.location.origin + '/cliente.html?id=' + c.id;
   navigator.clipboard?.writeText(link);
-  alert('Link do cliente copiado. Nesta versão de teste, ele abre a visão do cliente no mesmo navegador.');
-}
-
-function renderClientPortal(){
-  const hash=location.hash.replace('#cliente=','');
-  if(hash && data.clients.find(c=>c.id===hash))selectedClientId=hash;
-  const c=currentClient() || data.clients[0];
-  if(!c){clientPortal.innerHTML='<div class="empty">Nenhum cliente cadastrado ainda.</div>';return}
-  selectedClientId=c.id;
-  if(!selectedProjectId&&c.projects[0])selectedProjectId=c.projects[0].id;
-  const p=currentProject() || c.projects[0];
-  if(p)selectedProjectId=p.id;
-  clientPortal.innerHTML=`
-    <div class="client-hero">
-      <h1>Olá, ${c.name}</h1>
-      <p class="muted">Bem-vindo ao Portal Humaniza. Aqui você acompanha apenas os seus projetos, comenta, aprova ou solicita ajustes.</p>
-      <div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span></div>
-    </div>
-    ${c.access==='Bloqueado'?'<div class="empty">Acesso bloqueado temporariamente.</div>':`
-      <h2>Projetos</h2>
-      <div class="client-projects">${c.projects.map(x=>`
-        <div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}');renderClientPortal()">
-          <h3>${x.period}</h3>
-          <div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div>
-          <div class="progress"><span style="width:${progress(x)}%"></span></div>
-        </div>`).join('')}</div>
-      ${p?renderProjectDetail(c,p,false):'<div class="empty">Nenhum projeto disponível.</div>'}`}`;
+  alert('Link do cliente copiado: ' + link);
 }
 
 function render(){
-  agencyMode.classList.toggle('hidden',mode!=='agency');
-  clientMode.classList.toggle('hidden',mode!=='client');
-  btnNewClient.style.display=mode==='agency'?'inline-block':'none';
-  btnNewProject.style.display=mode==='agency'?'inline-block':'none';
-
-  if(mode==='agency'){
-    renderDashboard();renderClients();renderWorkspace();
-  } else {
-    renderClientPortal();
-  }
+  renderDashboard();
+  renderClients();
+  renderWorkspace();
   setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0);
 }
 
-window.addEventListener('hashchange',()=>{mode='client';localStorage.setItem('hubMode','client');render()});
 render();
