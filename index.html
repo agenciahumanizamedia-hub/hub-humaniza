@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hub de Projetos Humaniza</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <div class="header">
+    <div class="logo">Hub <span>Humaniza</span></div>
+    <div class="header-actions">
+      <button class="btn-dark" onclick="setMode('agency')">Painel Agência</button>
+      <button onclick="setMode('client')">Portal Cliente</button>
+      <button id="btnNewClient" onclick="openClientModal()">+ Cliente</button>
+      <button id="btnNewProject" class="btn-dark" onclick="openProjectModal()">+ Projeto/Mês</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="agencyMode">
+    <div class="top">
+      <div>
+        <h1>Painel Agência</h1>
+        <p>Controle clientes, meses, etapas e aprovações sem mexer no Portal Humaniza atual.</p>
+      </div>
+    </div>
+
+    <div class="dashboard" id="dashboard"></div>
+
+    <div class="layout">
+      <aside class="panel">
+        <h2>Clientes</h2>
+        <p class="muted">Cada cliente pode ter vários projetos/mês arquivados.</p>
+        <input id="searchClient" placeholder="Buscar cliente..." oninput="render()" />
+        <div id="clientsList"></div>
+      </aside>
+
+      <section id="workspace">
+        <div class="empty">Cadastre ou selecione um cliente.</div>
+      </section>
+    </div>
+  </section>
+
+  <section id="clientMode" class="hidden">
+    <div id="clientPortal" class="client-wrap"></div>
+  </section>
+</main>
+
+<div class="modal" id="clientModal">
+  <div class="modal-card">
+    <h2>Novo cliente</h2>
+    <div class="form">
+      <div>
+        <label>Cliente</label>
+        <input id="clientName" placeholder="Ex: Clínica Larissa Camanho">
+      </div>
+      <div>
+        <label>Email do cliente</label>
+        <input id="clientEmail" placeholder="Ex: cliente@email.com">
+      </div>
+      <div>
+        <label>Responsável Humaniza</label>
+        <input id="responsibleName" placeholder="Ex: Diego Castro">
+      </div>
+      <div>
+        <label>WhatsApp responsável</label>
+        <input id="responsiblePhone" placeholder="Ex: 5543999999999">
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="clientStatus">
+          <option>Ativo</option>
+          <option>Pausado</option>
+          <option>Finalizado</option>
+        </select>
+      </div>
+      <div>
+        <label>Acesso do cliente</label>
+        <select id="clientAccess">
+          <option>Liberado</option>
+          <option>Bloqueado</option>
+        </select>
+      </div>
+      <div class="full">
+        <label>Observação interna</label>
+        <textarea id="clientObs" oninput="autoGrow(this)" placeholder="Observações sobre esse cliente..."></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn-dark" onclick="closeModals()">Cancelar</button>
+      <button onclick="saveClient()">Salvar cliente</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="projectModal">
+  <div class="modal-card">
+    <h2>Novo projeto/mês</h2>
+    <div class="form">
+      <div>
+        <label>Cliente</label>
+        <select id="projectClient"></select>
+      </div>
+      <div>
+        <label>Período</label>
+        <input id="projectPeriod" placeholder="Ex: Julho 2026">
+      </div>
+      <div class="full">
+        <label>Copiar estrutura</label>
+        <select id="projectCopy">
+          <option value="">Começar em branco</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn-dark" onclick="closeModals()">Cancelar</button>
+      <button onclick="saveProject()">Criar projeto</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
