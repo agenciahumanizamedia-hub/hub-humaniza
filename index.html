@@ -11,16 +11,14 @@
   <div class="header">
     <div class="logo">Hub <span>Humaniza</span></div>
     <div class="header-actions">
-      <button class="btn-dark" onclick="setMode('agency')">Painel Agência</button>
-      <button onclick="setMode('client')">Portal Cliente</button>
-      <button id="btnNewClient" onclick="openClientModal()">+ Cliente</button>
-      <button id="btnNewProject" class="btn-dark" onclick="openProjectModal()">+ Projeto/Mês</button>
+      <button onclick="openClientModal()">+ Cliente</button>
+      <button class="btn-dark" onclick="openProjectModal()">+ Projeto/Mês</button>
     </div>
   </div>
 </header>
 
 <main>
-  <section id="agencyMode">
+  <section>
     <div class="top">
       <div>
         <h1>Painel Agência</h1>
@@ -42,10 +40,6 @@
         <div class="empty">Cadastre ou selecione um cliente.</div>
       </section>
     </div>
-  </section>
-
-  <section id="clientMode" class="hidden">
-    <div id="clientPortal" class="client-wrap"></div>
   </section>
 </main>
 
