@@ -18,3 +18,8 @@
 .readonly-box a:hover{text-decoration:underline}
 .content-item.done{box-shadow:0 0 0 2px rgba(44,157,99,.25)}
 .content-item.done h4::after{content:"  • Finalizado";color:#2C9D63;font-size:13px}
+
+.client-toolbar{display:flex;justify-content:flex-start;margin-bottom:12px}
+.locked-card{opacity:.55;cursor:not-allowed!important}
+.locked-card:hover{border-color:var(--linha)!important}
+@media(max-width:720px){.client-toolbar .btn-dark{width:100%}.client-projects{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.stage-head{flex-direction:column}.actions button{width:100%}}
