@@ -1,384 +1,86 @@
-let data = JSON.parse(localStorage.getItem('humanizaHubData') || '{"clients":[]}');
-let selectedClientId = localStorage.getItem('hubSelectedClient') || null;
-let selectedProjectId = localStorage.getItem('hubSelectedProject') || null;
+import { db, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp } from "./firebase.js";
+
+let clients=[], projects=[], selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null;
+
+Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist});
 
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
-function saveAll(){localStorage.setItem('humanizaHubData', JSON.stringify(data))}
-function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'; saveCurrentFields()}
+function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'}
 function closeModals(){document.querySelectorAll('.modal').forEach(m=>m.classList.remove('active'))}
+function statusPill(s){if(s==='Aprovado')return'<span class="pill green">Aprovado</span>';if(s==='Ajustes solicitados')return'<span class="pill yellow">Ajustes</span>';if(s==='Bloqueado')return'<span class="pill lock">Bloqueado</span>';if(s==='Em andamento'||s==='Em desenvolvimento')return'<span class="pill purple">'+s+'</span>';return'<span class="pill yellow">'+s+'</span>'}
+function progress(p){let n=0;if(p.strategicStatus==='Aprovado')n+=25;if(p.productionStatus==='Aprovado')n+=25;if(p.calendarStatus==='Aprovado')n+=25;if(p.approvalStatus==='Finalizado')n+=25;return n}
 
-function openClientModal(){
-  clientName.value='';
-  clientEmail.value='';
-  responsibleName.value='';
-  responsiblePhone.value='';
-  clientStatus.value='Ativo';
-  clientAccess.value='Liberado';
-  clientObs.value='';
-  clientModal.classList.add('active');
+function defaultChecklist(type){
+  if(type === 'roteiro'){
+    return [
+      {label:'Conteúdo criado',done:false},
+      {label:'Revisado internamente',done:false},
+      {label:'Cliente aprovou',done:false},
+      {label:'Gravado',done:false},
+      {label:'Editado',done:false},
+      {label:'Legenda pronta',done:false},
+      {label:'Publicado',done:false}
+    ];
+  }
+  return [
+    {label:'Conteúdo criado',done:false},
+    {label:'Revisado internamente',done:false},
+    {label:'Cliente aprovou',done:false},
+    {label:'Arte criada',done:false},
+    {label:'Legenda pronta',done:false},
+    {label:'Publicado',done:false}
+  ];
 }
-
-function openProjectModal(){
-  if(!data.clients.length){alert('Cadastre um cliente primeiro.'); return}
-  projectClient.innerHTML = data.clients.map(c=>`<option value="${c.id}" ${c.id===selectedClientId?'selected':''}>${c.name}</option>`).join('');
-  updateCopyOptions();
-  projectClient.onchange = updateCopyOptions;
-  projectPeriod.value='';
-  projectModal.classList.add('active');
-}
-
-function updateCopyOptions(){
-  const c = data.clients.find(x=>x.id===projectClient.value);
-  projectCopy.innerHTML = '<option value="">Começar em branco</option>' + (c?.projects||[]).map(p=>`<option value="${p.id}">Duplicar ${p.period}</option>`).join('');
-}
-
-function saveClient(){
-  const name=clientName.value.trim();
-  if(!name){alert('Coloque o nome do cliente.');return}
-  const c={
-    id:uid(),
-    name,
-    email:clientEmail.value.trim(),
-    responsibleName:responsibleName.value.trim(),
-    responsiblePhone:responsiblePhone.value.trim().replace(/\D/g,''),
-    status:clientStatus.value,
-    access:clientAccess.value,
-    obs:clientObs.value.trim(),
-    projects:[]
-  };
-  data.clients.push(c);
-  selectedClientId=c.id;
-  selectedProjectId=null;
-  localStorage.setItem('hubSelectedClient',selectedClientId);
-  saveAll();
-  closeModals();
-  render();
-}
-
-function baseProject(period){
+function newContentItem(type){
+  const map={roteiro:'Roteiro',carrossel:'Carrossel',estatico:'Estático'};
   return {
     id:uid(),
-    period,
-    strategicStatus:'Aguardando aprovação',
-    productionStatus:'Bloqueado',
-    calendarStatus:'Bloqueado',
-    approvalStatus:'Bloqueado',
-    history:['Projeto criado.'],
-    strategic:{
-      macro:'Objetivo principal do mês.',
-      editorial:'Autoridade, conexão, prova e conversão.',
-      themes:'Tema 01\nTema 02\nTema 03\nTema 04',
-      creative:'Tom humano, claro e estratégico.',
-      note:''
-    },
-    production:{
-      reels:'Reels 01\nTema:\nObjetivo:\nGancho:\nDesenvolvimento:\nCTA:',
-      carousel:'Carrossel 01\nTema:\nObjetivo:\nCards:\nLegenda:\nCTA:',
-      staticPost:'Post Estático\nTema:\nMensagem principal:\nLegenda:',
-      capture:'Data:\nLocal:\nEquipe:\nChecklist:',
-      note:''
-    },
-    calendar:{
-      content:'Calendário Editorial\n\n01/07:\nFormato:\nTema:\nStatus:',
-      note:''
-    }
+    type,
+    title:map[type]||'Conteúdo',
+    driveLink:'',
+    responsible:'',
+    fields:{tema:'',objetivo:'',gancho:'',desenvolvimento:'',cta:'',slides:'',mensagem:'',legenda:''},
+    checklist:defaultChecklist(type),
+    note:''
   }
 }
+function baseProject(period,clientId){return{clientId,period,strategicStatus:'Aguardando aprovação',productionStatus:'Bloqueado',calendarStatus:'Bloqueado',approvalStatus:'Bloqueado',history:['Projeto criado.'],strategic:{macro:'Objetivo principal do mês.',editorial:'Autoridade, conexão, prova e conversão.',themes:'Tema 01\nTema 02\nTema 03\nTema 04',creative:'Tom humano, claro e estratégico.',note:''},production:{items:[newContentItem('roteiro'),newContentItem('carrossel'),newContentItem('estatico')],note:''},calendar:{content:'Calendário Editorial\n\n01/07:\nFormato:\nTema:\nStatus:',note:''}}}
 
-function saveProject(){
-  const c=data.clients.find(x=>x.id===projectClient.value);
-  if(!c)return;
-  const period=projectPeriod.value.trim();
-  if(!period){alert('Coloque o período.');return}
-  let p;
-  const copyId=projectCopy.value;
-  if(copyId){
-    const old=c.projects.find(x=>x.id===copyId);
-    p=JSON.parse(JSON.stringify(old));
-    p.id=uid();
-    p.period=period;
-    p.history=['Projeto criado duplicando '+old.period+'.'];
-    p.strategicStatus='Aguardando aprovação';
-    p.productionStatus='Bloqueado';
-    p.calendarStatus='Bloqueado';
-    p.approvalStatus='Bloqueado';
-  } else {
-    p=baseProject(period);
-  }
-  c.projects.unshift(p);
-  selectedClientId=c.id;
-  selectedProjectId=p.id;
-  localStorage.setItem('hubSelectedClient',selectedClientId);
-  localStorage.setItem('hubSelectedProject',selectedProjectId);
-  saveAll();
-  closeModals();
-  render();
-}
-
-function currentClient(){return data.clients.find(c=>c.id===selectedClientId)}
-function currentProject(){return currentClient()?.projects.find(p=>p.id===selectedProjectId)}
-
-function selectClient(id){
-  saveCurrentFields();
-  selectedClientId=id;
-  const c=currentClient();
-  selectedProjectId=c?.projects[0]?.id||null;
-  localStorage.setItem('hubSelectedClient',selectedClientId);
-  localStorage.setItem('hubSelectedProject',selectedProjectId||'');
-  render();
-}
-
-function selectProject(id){
-  saveCurrentFields();
-  selectedProjectId=id;
-  localStorage.setItem('hubSelectedProject',id);
-  render();
-}
-
-function statusPill(status){
-  if(status==='Aprovado')return '<span class="pill green">Aprovado</span>';
-  if(status==='Ajustes solicitados')return '<span class="pill yellow">Ajustes</span>';
-  if(status==='Bloqueado')return '<span class="pill lock">Bloqueado</span>';
-  if(status==='Em andamento'||status==='Em desenvolvimento')return '<span class="pill purple">'+status+'</span>';
-  return '<span class="pill yellow">'+status+'</span>';
-}
-
-function progress(p){
-  let n=0;
-  if(p.strategicStatus==='Aprovado')n+=25;
-  if(p.productionStatus==='Aprovado')n+=25;
-  if(p.calendarStatus==='Aprovado')n+=25;
-  if(p.approvalStatus==='Finalizado')n+=25;
-  return n;
-}
-
-function renderDashboard(){
-  const projects=data.clients.flatMap(c=>c.projects.map(p=>({c,p})));
-  dashboard.innerHTML=`
-    <div class="dashboard-card"><span class="muted">Clientes</span><strong>${data.clients.length}</strong></div>
-    <div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div>
-    <div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.p.strategicStatus!=='Aprovado').length}</strong></div>
-    <div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x.p)===100).length}</strong></div>`;
-}
-
-function renderClients(){
-  const q=(searchClient.value||'').toLowerCase();
-  const list=data.clients.filter(c=>c.name.toLowerCase().includes(q));
-  clientsList.innerHTML=list.length?list.map(c=>`
-    <div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')">
-      <h3>${c.name}</h3>
-      <div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>${c.projects.length} projeto(s)</div>
-      <div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${c.projects[0]?statusPill(c.projects[0].strategicStatus):''}</div>
-    </div>`).join(''):'<div class="empty">Nenhum cliente.</div>';
-}
-
-function renderWorkspace(){
-  const c=currentClient();
-  if(!c){workspace.innerHTML='<div class="empty">Cadastre ou selecione um cliente.</div>';return}
-  if(!selectedProjectId&&c.projects[0])selectedProjectId=c.projects[0].id;
-  const p=currentProject();
-  workspace.innerHTML=`
-    <div class="panel">
-      <div class="top" style="margin:0">
-        <div>
-          <h2>${c.name}</h2>
-          <p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p>
-        </div>
-        <button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button>
-      </div>
-      <div class="actions">
-        <button onclick="openProjectModal()">+ Novo projeto/mês</button>
-        <button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button>
-      </div>
-    </div>
-    ${renderProjects(c)}
-    ${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`;
-}
-
-function renderProjects(c){
-  if(!c.projects.length)return '';
-  return `<div class="project-list">${c.projects.map(x=>`
-    <div class="project-card ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')">
-      <h3>${x.period}</h3>
-      <div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div>
-      <div class="progress"><span style="width:${progress(x)}%"></span></div>
-    </div>`).join('')}</div>`;
-}
-
-function stepClass(status){
-  if(status==='Aprovado')return 'done';
-  if(status==='Bloqueado')return 'locked';
-  return 'active';
-}
-
-function renderProjectDetail(c,p,isAdminView){
-  return `
-    <div class="stage">
-      <div class="stage-head">
-        <div><h2>Projeto ${p.period}</h2><p>Etapas liberadas conforme aprovação.</p></div>
-        <span class="pill">${progress(p)}%</span>
-      </div>
-      <div class="flow">
-        <div class="step ${stepClass(p.strategicStatus)}"><b>01 Planejamento</b><br>${p.strategicStatus}</div>
-        <div class="step ${stepClass(p.productionStatus)}"><b>02 Desenvolvimento</b><br>${p.productionStatus}</div>
-        <div class="step ${stepClass(p.calendarStatus)}"><b>03 Calendário</b><br>${p.calendarStatus}</div>
-        <div class="step ${stepClass(p.approvalStatus)}"><b>04 Aprovações</b><br>${p.approvalStatus}</div>
-      </div>
-    </div>
-    ${stageStrategic(p,isAdminView)}
-    ${stageProduction(p,isAdminView)}
-    ${stageCalendar(p,isAdminView)}
-    <div class="stage">
-      <h2>Histórico</h2>
-      <div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div>
-    </div>`;
-}
-
-function field(label,id,value,isAdminView){
-  if(isAdminView)return `<div class="content-box"><label>${label}</label><textarea id="${id}" oninput="autoGrow(this)">${value||''}</textarea></div>`;
-  return `<div class="content-box"><label>${label}</label><div class="readonly-box">${value||''}</div></div>`;
-}
-
-function stageStrategic(p,isAdminView){
-  return `<div class="stage">
-    <div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>A produção só libera após essa aprovação.</p></div>${statusPill(p.strategicStatus)}</div>
-    <div class="content-grid">
-      ${field('Visão Macro','strategic_macro',p.strategic.macro,isAdminView)}
-      ${field('Linha Editorial','strategic_editorial',p.strategic.editorial,isAdminView)}
-      ${field('Temas do mês','strategic_themes',p.strategic.themes,isAdminView)}
-      ${field('Direção Criativa','strategic_creative',p.strategic.creative,isAdminView)}
-    </div>
-    <label>Observações do cliente</label>
-    <textarea class="note" id="strategic_note" oninput="autoGrow(this)">${p.strategic.note||''}</textarea>
-    <div class="actions">
-      <button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button>
-      <button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button>
-    </div>
-  </div>`;
-}
-
-function stageProduction(p,isAdminView){
-  return `<div class="stage ${p.productionStatus==='Bloqueado'?'locked':''}">
-    <div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>Produção seguindo exatamente o planejamento aprovado.</p></div>${statusPill(p.productionStatus)}</div>
-    ${p.productionStatus==='Bloqueado'?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`
-      <div class="content-grid">
-        ${field('Roteiros','production_reels',p.production.reels,isAdminView)}
-        ${field('Carrosséis','production_carousel',p.production.carousel,isAdminView)}
-        ${field('Estático','production_staticPost',p.production.staticPost,isAdminView)}
-        ${field('Captação','production_capture',p.production.capture,isAdminView)}
-      </div>
-      <label>Observações do cliente</label>
-      <textarea class="note" id="production_note" oninput="autoGrow(this)">${p.production.note||''}</textarea>
-      <div class="actions">
-        <button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button>
-        <button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button>
-      </div>`}
-  </div>`;
-}
-
-function stageCalendar(p,isAdminView){
-  return `<div class="stage ${p.calendarStatus==='Bloqueado'?'locked':''}">
-    <div class="stage-head"><div><h2>03 Calendário Editorial</h2><p>Organização de datas, formatos e temas.</p></div>${statusPill(p.calendarStatus)}</div>
-    ${p.calendarStatus==='Bloqueado'?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`
-      ${field('Calendário Editorial','calendar_content',p.calendar.content,isAdminView)}
-      <label>Observações do cliente</label>
-      <textarea class="note" id="calendar_note" oninput="autoGrow(this)">${p.calendar.note||''}</textarea>
-      <div class="actions">
-        <button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button>
-        <button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button>
-      </div>`}
-  </div>`;
-}
-
-function saveCurrentFields(){
-  const p=currentProject();
-  if(!p)return;
-  const g=id=>document.getElementById(id)?.value;
-  if(g('strategic_macro')!==undefined)p.strategic.macro=g('strategic_macro');
-  if(g('strategic_editorial')!==undefined)p.strategic.editorial=g('strategic_editorial');
-  if(g('strategic_themes')!==undefined)p.strategic.themes=g('strategic_themes');
-  if(g('strategic_creative')!==undefined)p.strategic.creative=g('strategic_creative');
-  if(g('strategic_note')!==undefined)p.strategic.note=g('strategic_note');
-  if(g('production_reels')!==undefined)p.production.reels=g('production_reels');
-  if(g('production_carousel')!==undefined)p.production.carousel=g('production_carousel');
-  if(g('production_staticPost')!==undefined)p.production.staticPost=g('production_staticPost');
-  if(g('production_capture')!==undefined)p.production.capture=g('production_capture');
-  if(g('production_note')!==undefined)p.production.note=g('production_note');
-  if(g('calendar_content')!==undefined)p.calendar.content=g('calendar_content');
-  if(g('calendar_note')!==undefined)p.calendar.note=g('calendar_note');
-  saveAll();
-}
-
-function addHistory(p,text){p.history.unshift(new Date().toLocaleString('pt-BR')+' • '+text)}
-
-function send(c,msg){
-  if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}
-  window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank');
-}
-
-function approveStrategic(){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  p.strategicStatus='Aprovado';
-  p.productionStatus='Em desenvolvimento';
-  addHistory(p,'Planejamento aprovado. Desenvolvimento liberado.');
-  saveAll();render();
-  send(c,`✅ PLANEJAMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nA produção pode iniciar seguindo exatamente o planejamento aprovado.`);
-}
-
-function approveProduction(){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  p.productionStatus='Aprovado';
-  p.calendarStatus='Em desenvolvimento';
-  addHistory(p,'Desenvolvimento aprovado. Calendário liberado.');
-  saveAll();render();
-  send(c,`✅ DESENVOLVIMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nCalendário Editorial liberado.`);
-}
-
-function approveCalendar(){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  p.calendarStatus='Aprovado';
-  p.approvalStatus='Em andamento';
-  addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.');
-  saveAll();render();
-  send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);
-}
-
-function requestAdjust(type){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  const map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};
-  p[map[type][0]]='Ajustes solicitados';
-  addHistory(p,'Ajustes solicitados em '+map[type][1]+'.');
-  saveAll();render();
-  send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);
-}
-
-function deleteClient(id){
-  if(!confirm('Excluir cliente e todos os projetos dele?'))return;
-  data.clients=data.clients.filter(c=>c.id!==id);
-  selectedClientId=data.clients[0]?.id||null;
-  selectedProjectId=data.clients[0]?.projects[0]?.id||null;
-  localStorage.setItem('hubSelectedClient', selectedClientId || '');
-  localStorage.setItem('hubSelectedProject', selectedProjectId || '');
-  saveAll();render();
-}
-
-function copyClientLink(){
-  const c=currentClient();
-  if(!c)return;
-  const link=window.location.origin + '/cliente.html?id=' + c.id;
-  navigator.clipboard?.writeText(link);
-  alert('Link do cliente copiado: ' + link);
-}
-
-function render(){
-  renderDashboard();
-  renderClients();
-  renderWorkspace();
-  setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0);
-}
-
-render();
+async function loadData(){clients=(await getDocs(collection(db,'hubClients'))).docs.map(d=>({id:d.id,...d.data()}));projects=(await getDocs(collection(db,'hubProjects'))).docs.map(d=>({id:d.id,...d.data()}));if(selectedClientId&&!clients.find(c=>c.id===selectedClientId))selectedClientId=clients[0]?.id||null;if(!selectedClientId&&clients[0])selectedClientId=clients[0].id;let ps=projects.filter(p=>p.clientId===selectedClientId);if(selectedProjectId&&!ps.find(p=>p.id===selectedProjectId))selectedProjectId=ps[0]?.id||null;if(!selectedProjectId&&ps[0])selectedProjectId=ps[0].id;localStorage.setItem('hubSelectedClient',selectedClientId||'');localStorage.setItem('hubSelectedProject',selectedProjectId||'');render()}
+function currentClient(){return clients.find(c=>c.id===selectedClientId)}
+function currentProject(){return projects.find(p=>p.id===selectedProjectId)}
+function openClientModal(){clientName.value='';clientEmail.value='';responsibleName.value='';responsiblePhone.value='';clientStatus.value='Ativo';clientAccess.value='Liberado';clientObs.value='';clientModal.classList.add('active')}
+function openProjectModal(){if(!clients.length){alert('Cadastre um cliente primeiro.');return}projectClient.innerHTML=clients.map(c=>`<option value="${c.id}" ${c.id===selectedClientId?'selected':''}>${c.name}</option>`).join('');updateCopyOptions();projectClient.onchange=updateCopyOptions;projectPeriod.value='';projectModal.classList.add('active')}
+function updateCopyOptions(){let list=projects.filter(p=>p.clientId===projectClient.value);projectCopy.innerHTML='<option value="">Começar em branco</option>'+list.map(p=>`<option value="${p.id}">Duplicar ${p.period}</option>`).join('')}
+async function saveClient(){let name=clientName.value.trim();if(!name){alert('Coloque o nome do cliente.');return}let r=await addDoc(collection(db,'hubClients'),{name,email:clientEmail.value.trim(),responsibleName:responsibleName.value.trim(),responsiblePhone:responsiblePhone.value.trim().replace(/\D/g,''),status:clientStatus.value,access:clientAccess.value,obs:clientObs.value.trim(),createdAt:serverTimestamp(),updatedAt:serverTimestamp()});selectedClientId=r.id;selectedProjectId=null;closeModals();await loadData()}
+async function saveProject(){let clientId=projectClient.value,period=projectPeriod.value.trim();if(!period){alert('Coloque o período.');return}let data,copyId=projectCopy.value;if(copyId){let old=projects.find(p=>p.id===copyId);data=JSON.parse(JSON.stringify(old));delete data.id;data.period=period;data.clientId=clientId;data.history=['Projeto criado duplicando '+old.period+'.'];data.strategicStatus='Aguardando aprovação';data.productionStatus='Bloqueado';data.calendarStatus='Bloqueado';data.approvalStatus='Bloqueado'}else data=baseProject(period,clientId);data.createdAt=serverTimestamp();data.updatedAt=serverTimestamp();let r=await addDoc(collection(db,'hubProjects'),data);selectedClientId=clientId;selectedProjectId=r.id;closeModals();await loadData()}
+function selectClient(id){selectedClientId=id;selectedProjectId=projects.filter(p=>p.clientId===id)[0]?.id||null;localStorage.setItem('hubSelectedClient',id);localStorage.setItem('hubSelectedProject',selectedProjectId||'');render()}
+function selectProject(id){selectedProjectId=id;localStorage.setItem('hubSelectedProject',id);render()}
+function renderDashboard(){dashboard.innerHTML=`<div class="dashboard-card"><span class="muted">Clientes</span><strong>${clients.length}</strong></div><div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div><div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.strategicStatus!=='Aprovado').length}</strong></div><div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x)===100).length}</strong></div>`}
+function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clients.filter(c=>c.name.toLowerCase().includes(q));clientsList.innerHTML=list.length?list.map(c=>{let count=projects.filter(p=>p.clientId===c.id).length,first=projects.find(p=>p.clientId===c.id);return`<div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')"><h3>${c.name}</h3><div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>${count} projeto(s)</div><div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${first?statusPill(first.strategicStatus):''}</div></div>`}).join(''):'<div class="empty">Nenhum cliente.</div>'}
+function renderWorkspace(){let c=currentClient();if(!c){workspace.innerHTML='<div class="empty">Cadastre ou selecione um cliente.</div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p></div><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div><div class="actions"><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button></div></div>${renderProjects(c)}${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`}
+function renderProjects(c){let list=projects.filter(p=>p.clientId===c.id);if(!list.length)return'';return`<div class="project-list">${list.map(x=>`<div class="project-card ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}</div>`}
+function stepClass(s){if(s==='Aprovado')return'done';if(s==='Bloqueado')return'locked';return'active'}
+function renderProjectDetail(c,p,isAdmin){return`<div class="stage"><div class="stage-head"><div><h2>Projeto ${p.period}</h2><p>Etapas liberadas conforme aprovação.</p></div><span class="pill">${progress(p)}%</span></div><div class="flow"><div class="step ${stepClass(p.strategicStatus)}"><b>01 Planejamento</b><br>${p.strategicStatus}</div><div class="step ${stepClass(p.productionStatus)}"><b>02 Desenvolvimento</b><br>${p.productionStatus}</div><div class="step ${stepClass(p.calendarStatus)}"><b>03 Calendário</b><br>${p.calendarStatus}</div><div class="step ${stepClass(p.approvalStatus)}"><b>04 Aprovações</b><br>${p.approvalStatus}</div></div></div>${stageStrategic(p,isAdmin)}${stageProduction(p,isAdmin)}${stageCalendar(p,isAdmin)}<div class="stage"><h2>Histórico</h2><div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div></div>`}
+function field(label,id,value,isAdmin){return isAdmin?`<div class="content-box"><label>${label}</label><textarea id="${id}" oninput="autoGrow(this)">${value||''}</textarea></div>`:`<div class="content-box"><label>${label}</label><div class="readonly-box">${value||''}</div></div>`}
+function stageStrategic(p,isAdmin){return`<div class="stage"><div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>A produção só libera após essa aprovação.</p></div>${statusPill(p.strategicStatus)}</div><div class="content-grid">${field('Visão Macro','strategic_macro',p.strategic?.macro,isAdmin)}${field('Linha Editorial','strategic_editorial',p.strategic?.editorial,isAdmin)}${field('Temas do mês','strategic_themes',p.strategic?.themes,isAdmin)}${field('Direção Criativa','strategic_creative',p.strategic?.creative,isAdmin)}</div><label>Observações do cliente</label><textarea class="note" id="strategic_note" oninput="autoGrow(this)">${p.strategic?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button><button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button></div></div>`}
+function stageProduction(p,isAdmin){let items=p.production?.items||[];return`<div class="stage ${p.productionStatus==='Bloqueado'?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>Cards separados para roteiros, carrosséis e estáticos.</p></div>${statusPill(p.productionStatus)}</div>${p.productionStatus==='Bloqueado'?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`<div class="content-actions"><button onclick="addContentItem('roteiro')">+ Adicionar roteiro</button><button onclick="addContentItem('carrossel')">+ Adicionar carrossel</button><button onclick="addContentItem('estatico')">+ Adicionar estático</button></div>${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)">${p.production?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button><button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button></div>`}</div>`}
+function itemProgress(item){let total=item.checklist?.length||0,done=(item.checklist||[]).filter(x=>x.done).length;return total?Math.round(done*100/total):0}
+function renderContentItem(item){let pct=itemProgress(item),typeLabel=item.type==='roteiro'?'🎬 Roteiro':item.type==='carrossel'?'📚 Carrossel':'🖼️ Estático';return`<div class="content-item ${pct===100?'done':''}" data-item="${item.id}"><div class="content-item-head"><div><h4>${typeLabel}</h4><span class="muted">${pct}% concluído</span></div><button class="btn-danger" onclick="removeContentItem('${item.id}')">Remover</button></div><div class="content-progress"><span style="width:${pct}%"></span></div><label>Responsável</label><textarea data-field="responsible" oninput="autoGrow(this)" placeholder="Ex: Diego, Luana, Lucas">${item.responsible||''}</textarea><label>Link Drive</label><textarea data-field="driveLink" oninput="autoGrow(this)" placeholder="Cole aqui o link do Drive">${item.driveLink||''}</textarea><label>Tema</label><textarea data-field="tema" oninput="autoGrow(this)">${item.fields?.tema||''}</textarea>${item.type==='roteiro'?`<label>Objetivo</label><textarea data-field="objetivo" oninput="autoGrow(this)">${item.fields?.objetivo||''}</textarea><label>Gancho</label><textarea data-field="gancho" oninput="autoGrow(this)">${item.fields?.gancho||''}</textarea><label>Desenvolvimento</label><textarea data-field="desenvolvimento" oninput="autoGrow(this)">${item.fields?.desenvolvimento||''}</textarea><label>CTA</label><textarea data-field="cta" oninput="autoGrow(this)">${item.fields?.cta||''}</textarea>`:''}${item.type==='carrossel'?`<label>Objetivo</label><textarea data-field="objetivo" oninput="autoGrow(this)">${item.fields?.objetivo||''}</textarea><label>Slides</label><textarea data-field="slides" oninput="autoGrow(this)">${item.fields?.slides||''}</textarea><label>Legenda</label><textarea data-field="legenda" oninput="autoGrow(this)">${item.fields?.legenda||''}</textarea><label>CTA</label><textarea data-field="cta" oninput="autoGrow(this)">${item.fields?.cta||''}</textarea>`:''}${item.type==='estatico'?`<label>Mensagem principal</label><textarea data-field="mensagem" oninput="autoGrow(this)">${item.fields?.mensagem||''}</textarea><label>Legenda</label><textarea data-field="legenda" oninput="autoGrow(this)">${item.fields?.legenda||''}</textarea><label>CTA</label><textarea data-field="cta" oninput="autoGrow(this)">${item.fields?.cta||''}</textarea>`:''}<div class="checklist">${(item.checklist||[]).map((c,i)=>`<label class="checkline"><input type="checkbox" ${c.done?'checked':''} onchange="toggleChecklist('${item.id}',${i},this.checked)"> ${c.label}</label>`).join('')}</div><label>Observações</label><textarea data-field="note" oninput="autoGrow(this)">${item.note||''}</textarea></div>`}
+function stageCalendar(p,isAdmin){return`<div class="stage ${p.calendarStatus==='Bloqueado'?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><p>Organização de datas, formatos e temas.</p></div>${statusPill(p.calendarStatus)}</div>${p.calendarStatus==='Bloqueado'?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`${field('Calendário Editorial','calendar_content',p.calendar?.content,isAdmin)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button><button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button></div>`}</div>`}
+function collectProduction(p){let items=(p.production?.items||[]).map(item=>{let box=document.querySelector(`[data-item="${item.id}"]`);if(!box)return item;let fields={...item.fields};box.querySelectorAll('[data-field]').forEach(el=>{let k=el.getAttribute('data-field');if(k==='note') item.note=el.value; else if(k==='driveLink') item.driveLink=el.value; else if(k==='responsible') item.responsible=el.value; else fields[k]=el.value});return{...item,fields,note:item.note||''}});return{...p.production,items,note:document.getElementById('production_note')?.value??p.production?.note??''}}
+function getForm(p){let g=id=>document.getElementById(id)?.value;return{strategic:{...p.strategic,macro:g('strategic_macro')??p.strategic?.macro??'',editorial:g('strategic_editorial')??p.strategic?.editorial??'',themes:g('strategic_themes')??p.strategic?.themes??'',creative:g('strategic_creative')??p.strategic?.creative??'',note:g('strategic_note')??p.strategic?.note??''},production:collectProduction(p),calendar:{...p.calendar,content:g('calendar_content')??p.calendar?.content??'',note:g('calendar_note')??p.calendar?.note??''}}}
+async function saveProjectExtra(extra={}){let p=currentProject();if(!p)return;await updateDoc(doc(db,'hubProjects',p.id),{...getForm(p),...extra,updatedAt:serverTimestamp()})}
+function addHistory(p,text){return[new Date().toLocaleString('pt-BR')+' • '+text,...(p.history||[])]}
+async function addContentItem(type){let p=currentProject();let form=getForm(p);form.production.items=[...(form.production.items||[]),newContentItem(type)];await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+async function removeContentItem(id){let p=currentProject();let form=getForm(p);form.production.items=(form.production.items||[]).filter(x=>x.id!==id);await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+async function toggleChecklist(id,index,checked){let p=currentProject();let form=getForm(p);let item=form.production.items.find(x=>x.id===id);if(item&&item.checklist[index])item.checklist[index].done=checked;await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+function send(c,msg){if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank')}
+async function approveStrategic(){let c=currentClient(),p=currentProject();await saveProjectExtra({strategicStatus:'Aprovado',productionStatus:'Em desenvolvimento',history:addHistory(p,'Planejamento aprovado. Desenvolvimento liberado.')});send(c,`✅ PLANEJAMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nA produção pode iniciar seguindo exatamente o planejamento aprovado.`);await loadData()}
+async function approveProduction(){let c=currentClient(),p=currentProject();await saveProjectExtra({productionStatus:'Aprovado',calendarStatus:'Em desenvolvimento',history:addHistory(p,'Desenvolvimento aprovado. Calendário liberado.')});send(c,`✅ DESENVOLVIMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nCalendário Editorial liberado.`);await loadData()}
+async function approveCalendar(){let c=currentClient(),p=currentProject();await saveProjectExtra({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.')});send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);await loadData()}
+async function requestAdjust(type){let c=currentClient(),p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};await saveProjectExtra({[map[type][0]]:'Ajustes solicitados',history:addHistory(p,'Ajustes solicitados em '+map[type][1]+'.')});send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
+async function deleteClient(id){if(!confirm('Excluir cliente e todos os projetos dele?'))return;for(let p of projects.filter(p=>p.clientId===id))await deleteDoc(doc(db,'hubProjects',p.id));await deleteDoc(doc(db,'hubClients',id));selectedClientId=null;selectedProjectId=null;await loadData()}
+function copyClientLink(){let c=currentClient();if(!c)return;let link=window.location.origin+'/cliente.html?id='+c.id;navigator.clipboard?.writeText(link);alert('Link do cliente copiado: '+link)}
+function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+loadData();
