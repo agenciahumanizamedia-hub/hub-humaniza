@@ -38,3 +38,11 @@
 .readonly-box span[style*="background-color: rgb(17, 17, 17)"]{
   padding:2px 5px;border-radius:5px;
 }
+
+/* v1.3.1 editor: recuperação de cor e limpeza de formatação */
+.rich-toolbar{align-items:center}
+.rich-toolbar button{white-space:nowrap}
+@media(max-width:700px){
+  .rich-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+  .rich-toolbar button{width:100%;padding:8px 5px;font-size:11px}
+}
