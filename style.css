@@ -77,10 +77,14 @@
   }
 }
 
-
-/* v1.3.3 salvar alterações */
-.btn-save-status{
-  font-size:12px;
-  color:var(--cinza);
-  margin-top:6px;
-}
+/* v1.3.4 controle de status */
+.admin-control-panel{background:#202020;border:1px solid #393939;border-radius:18px;padding:18px;margin:0 0 18px}
+.control-head h3{margin:0 0 5px}.control-head p{margin:0;color:var(--cinza)}
+.control-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}
+.control-field{display:block;margin:0}.control-field span{display:block;color:var(--cinza);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
+.control-field select{width:100%;background:#2b2b2b;color:#fff;border:1px solid #454545;border-radius:10px;padding:10px}
+.stage-control{background:#202020;border:1px solid #393939;border-radius:12px;padding:10px;margin:12px 0;max-width:320px}
+.pill-complete{background:rgba(44,157,99,.16)!important;color:#72d5a0!important;border:1px solid rgba(44,157,99,.45)!important;animation:completePulse .45s ease-out}
+@keyframes completePulse{0%{transform:scale(.92);opacity:.4}70%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}
+@media(max-width:850px){.control-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.control-grid{grid-template-columns:1fr}.stage-control{max-width:none}}
