@@ -14,7 +14,8 @@ import {
   query,
   where,
   orderBy,
-  serverTimestamp
+  serverTimestamp,
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -43,5 +44,6 @@ export {
   query,
   where,
   orderBy,
-  serverTimestamp
+  serverTimestamp,
+  onSnapshot
 };
