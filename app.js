@@ -1,6 +1,56 @@
-import { db, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp } from "./firebase.js";
+import { db, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from "./firebase.js";
 
 let clients=[], projects=[], selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null;
+
+let realtimeReady=false;
+function showRealtimeNotice(){
+  let n=document.getElementById('realtimeNotice');
+  if(!n){
+    n=document.createElement('div');
+    n.id='realtimeNotice';
+    n.className='realtime-notice';
+    document.body.appendChild(n);
+  }
+  n.textContent='Atualizado agora';
+  n.classList.add('show');
+  clearTimeout(window.__rtNotice);
+  window.__rtNotice=setTimeout(()=>n.classList.remove('show'),1800);
+}
+function applyRealtimeData(newClients,newProjects){
+  clients=newClients;
+  projects=newProjects;
+  if(selectedClientId&&!clients.find(c=>c.id===selectedClientId))selectedClientId=clients[0]?.id||null;
+  if(!selectedClientId&&clients[0])selectedClientId=clients[0].id;
+  let ps=projects.filter(p=>p.clientId===selectedClientId);
+  if(selectedProjectId&&!ps.find(p=>p.id===selectedProjectId))selectedProjectId=ps[0]?.id||null;
+  if(!selectedProjectId&&ps[0])selectedProjectId=ps[0].id;
+  localStorage.setItem('hubSelectedClient',selectedClientId||'');
+  localStorage.setItem('hubSelectedProject',selectedProjectId||'');
+  render();
+  if(realtimeReady)showRealtimeNotice();
+  realtimeReady=true;
+}
+function startRealtime(){
+  let latestClients=[],latestProjects=[];
+  let gotClients=false,gotProjects=false;
+  onSnapshot(collection(db,'hubClients'),snap=>{
+    latestClients=snap.docs.map(d=>({id:d.id,...d.data()}));
+    gotClients=true;
+    if(gotProjects)applyRealtimeData(latestClients,latestProjects);
+  },err=>{
+    console.error('Erro tempo real clientes:',err);
+    alert('Erro ao acompanhar clientes em tempo real: '+(err.message||err));
+  });
+  onSnapshot(collection(db,'hubProjects'),snap=>{
+    latestProjects=snap.docs.map(d=>({id:d.id,...d.data()}));
+    gotProjects=true;
+    if(gotClients)applyRealtimeData(latestClients,latestProjects);
+  },err=>{
+    console.error('Erro tempo real projetos:',err);
+    alert('Erro ao acompanhar projetos em tempo real: '+(err.message||err));
+  });
+}
+
 
 Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl});
 
@@ -249,4 +299,4 @@ async function requestAdjust(type){let c=currentClient(),p=currentProject(),map=
 async function deleteClient(id){if(!confirm('Excluir cliente e todos os projetos dele?'))return;for(let p of projects.filter(p=>p.clientId===id))await deleteDoc(doc(db,'hubProjects',p.id));await deleteDoc(doc(db,'hubClients',id));selectedClientId=null;selectedProjectId=null;await loadData()}
 function copyClientLink(){let c=currentClient();if(!c)return;let link=window.location.origin+'/cliente.html?id='+c.id;navigator.clipboard?.writeText(link);alert('Link do cliente copiado: '+link)}
 function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
-loadData();
+startRealtime();
