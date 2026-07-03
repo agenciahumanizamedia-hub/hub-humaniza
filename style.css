@@ -23,3 +23,18 @@
 .locked-card{opacity:.55;cursor:not-allowed!important}
 .locked-card:hover{border-color:var(--linha)!important}
 @media(max-width:720px){.client-toolbar .btn-dark{width:100%}.client-projects{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.stage-head{flex-direction:column}.actions button{width:100%}}
+
+
+.rich-box{background:var(--branco);color:#1C1C1C}
+.rich-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.rich-toolbar button{padding:7px 10px;border-radius:8px;font-size:12px;background:#ECEBFF;color:#1C1C1C;border:1px solid #D7D5FF}
+.rich-editor{background:#fff;color:#1C1C1C;border:1px solid #ddd;border-radius:12px;padding:12px;min-height:46px;line-height:1.45;outline:none;white-space:pre-wrap}
+.rich-editor:focus{border-color:var(--roxo);box-shadow:0 0 0 2px rgba(91,86,255,.15)}
+.rich-editor b,.readonly-box b{font-weight:900}
+.rich-editor [style*="color"],.readonly-box [style*="color"]{font-weight:800}
+.readonly-box{word-break:break-word}
+
+.rich-editor span[style*="background-color: rgb(17, 17, 17)"],
+.readonly-box span[style*="background-color: rgb(17, 17, 17)"]{
+  padding:2px 5px;border-radius:5px;
+}
