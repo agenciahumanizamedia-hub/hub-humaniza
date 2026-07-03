@@ -46,3 +46,33 @@
   .rich-toolbar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
   .rich-toolbar button{width:100%;padding:8px 5px;font-size:11px}
 }
+
+
+/* v1.3.2 editor padronizado */
+.rich-editor{
+  font-family:Arial, Helvetica, sans-serif !important;
+  font-size:16px;
+  color:#1C1C1C;
+}
+.rich-editor *{
+  font-family:Arial, Helvetica, sans-serif !important;
+}
+.rich-toolbar{
+  align-items:center;
+  gap:7px;
+}
+.rich-toolbar button{
+  white-space:nowrap;
+}
+@media(max-width:700px){
+  .rich-toolbar{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:7px;
+  }
+  .rich-toolbar button{
+    width:100%;
+    padding:8px 5px;
+    font-size:11px;
+  }
+}
