@@ -1,10 +1,63 @@
 function clientAccessBlocked(c){return c?.accessState==='Bloqueado'||c?.clientState==='Pausado';}
 function projectAccessBlocked(p){return p?.projectAccess==='Bloqueado'||p?.projectState==='Bloqueado'||p?.projectState==='Rascunho';}
 function stageVisible(status){return ['Liberado ao cliente','Aguardando aprovação','Aprovado','Finalizado','Em desenvolvimento','Em andamento'].includes(status);}
-import { db, getDoc, getDocs, doc, updateDoc, collection, query, where, serverTimestamp } from "./firebase.js";
+import { db, getDoc, getDocs, doc, updateDoc, collection, query, where, serverTimestamp, onSnapshot } from "./firebase.js";
 
 const params=new URLSearchParams(window.location.search);
 let selectedClientId=params.get('id'),client=null,projects=[],selectedProjectId=null;
+
+let realtimeReady=false;
+function showRealtimeNotice(){
+  let n=document.getElementById('realtimeNotice');
+  if(!n){
+    n=document.createElement('div');
+    n.id='realtimeNotice';
+    n.className='realtime-notice';
+    document.body.appendChild(n);
+  }
+  n.textContent='Atualizado agora';
+  n.classList.add('show');
+  clearTimeout(window.__rtNotice);
+  window.__rtNotice=setTimeout(()=>n.classList.remove('show'),1800);
+}
+function applyClientRealtime(newClient,newProjects){
+  client=newClient;
+  projects=newProjects;
+  if(selectedProjectId&&!projects.find(p=>p.id===selectedProjectId))selectedProjectId=projects[0]?.id||null;
+  if(!selectedProjectId&&projects[0])selectedProjectId=projects[0].id;
+  renderClientPortal();
+  if(realtimeReady)showRealtimeNotice();
+  realtimeReady=true;
+}
+function startClientRealtime(){
+  const box=document.getElementById('clientPortal');
+  if(!selectedClientId){
+    box.innerHTML='<div class="empty">Link inválido. Nenhum cliente informado.</div>';
+    return;
+  }
+  let latestClient=null, latestProjects=[];
+  let gotClient=false, gotProjects=false;
+  onSnapshot(doc(db,'hubClients',selectedClientId),snap=>{
+    if(!snap.exists()){
+      box.innerHTML='<div class="empty">Cliente não encontrado no Firebase.</div>';
+      return;
+    }
+    latestClient={id:snap.id,...snap.data()};
+    gotClient=true;
+    if(gotProjects)applyClientRealtime(latestClient,latestProjects);
+  },err=>{
+    console.error('Erro tempo real cliente:',err);
+    box.innerHTML='<div class="empty">Erro ao carregar cliente em tempo real.</div>';
+  });
+  onSnapshot(query(collection(db,'hubProjects'),where('clientId','==',selectedClientId)),snap=>{
+    latestProjects=snap.docs.map(d=>({id:d.id,...d.data()}));
+    gotProjects=true;
+    if(gotClient)applyClientRealtime(latestClient,latestProjects);
+  },err=>{
+    console.error('Erro tempo real projetos:',err);
+    box.innerHTML='<div class="empty">Erro ao carregar projetos em tempo real.</div>';
+  });
+}
 
 Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects});
 
@@ -63,4 +116,4 @@ async function approveCalendar(){let p=currentProject();await save({calendarStat
 async function requestAdjust(type){let p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento Criativo'],calendar:['calendarStatus','Calendário']};await save({[map[type][0]]:'Ajustes solicitados',history:addH(p,'Cliente solicitou ajustes em '+map[type][1]+'.')});send(client,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${client.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
 function projectLockedLabel(i){return i===0?'Próximo mês':'Em breve'}
 function renderClientPortal(){let box=document.getElementById('clientPortal');if(client.access==='Bloqueado'){box.innerHTML='<div class="empty">Acesso bloqueado temporariamente.</div>';return}let p=currentProject()||projects[0];if(p)selectedProjectId=p.id;box.innerHTML=`<div class="client-hero"><h1>Olá, ${client.name}</h1><p class="muted">Aqui você acompanha seus projetos, aprova etapas ou solicita ajustes.</p><div class="pills"><span class="pill">${client.status}</span><span class="pill">${client.access}</span></div></div><div id="projectNav" class="stage"><h2>Projetos disponíveis</h2><p class="muted">Toque em um projeto para visualizar. Os próximos ficam bloqueados até liberação da Humaniza.</p><div class="client-projects">${projects.map(x=>`<div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}<div class="client-project locked-card"><h3>Próximo projeto</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(0)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div><div class="client-project locked-card"><h3>Projeto futuro</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(1)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div></div></div>${p?renderProjectDetail(client,p):'<div class="empty">Nenhum projeto disponível.</div>'}`;setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
-loadData();
+startClientRealtime();
