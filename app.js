@@ -347,7 +347,7 @@ function copyClientLink(){
     return;
   }
 
-  const DOMINIO_OFICIAL = 'https://humaniza-phi.vercel.app';
+  const DOMINIO_OFICIAL = 'https://hub-humaniza.vercel.app';
   const link = DOMINIO_OFICIAL + '/cliente.html?id=' + encodeURIComponent(c.id);
 
   if(navigator.clipboard && window.isSecureContext){
