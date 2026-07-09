@@ -91,6 +91,72 @@ async function loadData(){
 function field(label,id,value){return`<div class="content-box"><label>${label}</label><div class="readonly-box">${value||''}</div></div>`}
 function itemProgress(item){let total=item.checklist?.length||0,done=(item.checklist||[]).filter(x=>x.done).length;return total?Math.round(done*100/total):0}
 function contentTypeName(t){if(t==='roteiro')return'🎬 Roteiro';if(t==='carrossel')return'📚 Carrossel';return'🖼️ Estático'}
+
+function getCurrentClientFormData(p){
+  const items=(p.production?.items||[]).map(item=>{
+    const noteEl=document.getElementById('client_note_'+item.id);
+    return {...item,clientNote:noteEl?noteEl.value:(item.clientNote||'')};
+  });
+  return {
+    production:{...p.production,items},
+    calendar:{...p.calendar,clientNote:document.getElementById('calendar_client_note')?.value??p.calendar?.clientNote??''}
+  };
+}
+async function approveContentItem(itemId){
+  const p=currentProject(); if(!p)return;
+  const form=getCurrentClientFormData(p);
+  form.production.items=form.production.items.map(item=>item.id===itemId?{
+    ...item,
+    itemStatus:'Aprovado',
+    clientApproval:'Aprovado',
+    clientApprovedAt:new Date().toLocaleString('pt-BR')
+  }:item);
+  await updateDoc(doc(db,'hubProjects',p.id),{
+    production:form.production,
+    history:[new Date().toLocaleString('pt-BR')+' • Cliente aprovou um conteúdo.', ...(p.history||[])],
+    updatedAt:serverTimestamp()
+  });
+  alert('Item aprovado.');
+}
+async function requestContentAdjust(itemId){
+  const p=currentProject(); if(!p)return;
+  const form=getCurrentClientFormData(p);
+  form.production.items=form.production.items.map(item=>item.id===itemId?{
+    ...item,
+    itemStatus:'Ajustes',
+    clientApproval:'Ajustes solicitados',
+    clientAdjustedAt:new Date().toLocaleString('pt-BR')
+  }:item);
+  await updateDoc(doc(db,'hubProjects',p.id),{
+    production:form.production,
+    history:[new Date().toLocaleString('pt-BR')+' • Cliente solicitou ajuste em um conteúdo.', ...(p.history||[])],
+    updatedAt:serverTimestamp()
+  });
+  alert('Ajuste solicitado.');
+}
+async function approveCalendarDates(){
+  const p=currentProject(); if(!p)return;
+  const form=getCurrentClientFormData(p);
+  await updateDoc(doc(db,'hubProjects',p.id),{
+    calendar:{...form.calendar,clientStatus:'Aprovado'},
+    calendarStatus:'Aprovado',
+    history:[new Date().toLocaleString('pt-BR')+' • Cliente aprovou o Calendário Editorial.', ...(p.history||[])],
+    updatedAt:serverTimestamp()
+  });
+  alert('Calendário aprovado.');
+}
+async function requestCalendarAdjust(){
+  const p=currentProject(); if(!p)return;
+  const form=getCurrentClientFormData(p);
+  await updateDoc(doc(db,'hubProjects',p.id),{
+    calendar:{...form.calendar,clientStatus:'Ajustes solicitados'},
+    calendarStatus:'Ajustes solicitados',
+    history:[new Date().toLocaleString('pt-BR')+' • Cliente solicitou ajuste no Calendário Editorial.', ...(p.history||[])],
+    updatedAt:serverTimestamp()
+  });
+  alert('Ajuste solicitado no calendário.');
+}
+
 function renderContentItem(item){
   let pct=itemProgress(item);
   return `<div class="content-item ${pct===100?'done':''}" data-item="${item.id}">
@@ -138,7 +204,7 @@ function renderAutoCalendar(p){
   </div>`;
 }
 
-function stageCalendar(p){return`<div class="stage ${!stageVisible(p.calendarStatus)?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Salvar como PDF</button></div><p>Datas, formatos e temas organizados.</p></div>${statusPill(p.calendarStatus)}</div>${!stageVisible(p.calendarStatus)?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`<div class="content-box"><label>Calendário automático</label>${renderAutoCalendar(p)}</div>${field('Observações do calendário','calendar_content',p.calendar?.content)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes sobre o calendário.">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button><button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button></div>`}</div>`}
+function stageCalendar(p){return`<div class="stage ${!stageVisible(p.calendarStatus)?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Salvar como PDF</button></div><p>Datas, formatos e temas organizados.</p></div>${statusPill(p.calendarStatus)}</div>${!stageVisible(p.calendarStatus)?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`<div class="content-box"><label>Calendário automático</label>${renderAutoCalendar(p)}</div>${field('Observações do calendário','calendar_content',p.calendar?.content)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes sobre o calendário.">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveCalendarDates()">Aprovar datas do calendário</button><button class="btn-yellow" onclick="requestCalendarAdjust()">Solicitar ajuste nas datas</button></div>`}</div>`}
 function getForm(p){let g=id=>document.getElementById(id)?.value;let items=(p.production?.items||[]).map(item=>{let box=document.querySelector(`[data-item="${item.id}"]`);if(box){let note=box.querySelector('[data-field="note"]')?.value||item.note||'';return{...item,note}}return item});return{strategic:{...p.strategic,note:g('strategic_note')??p.strategic?.note??''},production:{...p.production,items,note:g('production_note')??p.production?.note??''},calendar:{...p.calendar,note:g('calendar_note')??p.calendar?.note??''}}}
 function addH(p,t){return[new Date().toLocaleString('pt-BR')+' • '+t,...(p.history||[])]}
 async function save(extra={}){let p=currentProject();await updateDoc(doc(db,'hubProjects',p.id),{...getForm(p),...extra,updatedAt:serverTimestamp()})}
