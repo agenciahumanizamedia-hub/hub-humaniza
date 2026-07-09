@@ -66,7 +66,7 @@ function startClientRealtime(){
   });
 }
 
-Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects});
+Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects,printDevelopment,printCalendar,printFullProject,approveCreativeItem,requestCreativeAdjust});
 
 function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'}
 function goToProjects(){document.getElementById('projectNav')?.scrollIntoView({behavior:'smooth',block:'start'})}
@@ -139,18 +139,47 @@ async function requestCreativeAdjust(itemId){
 
 function renderContentItem(item){
   let pct=itemProgress(item);
+  const approval = item.clientApproval || 'Aguardando resposta';
+  const approvalClass = approval === 'Aprovado' ? 'green' : approval === 'Ajustes solicitados' ? 'yellow' : 'purple';
+
   return `<div class="content-item ${pct===100?'done':''}" data-item="${item.id}">
-    <div class="content-item-head"><div><h4>${contentTypeName(item.type)}</h4><span class="muted">Status interno: ${pct}% concluído</span></div></div>
+    <div class="content-item-head">
+      <div>
+        <h4>${contentTypeName(item.type)}</h4>
+        <span class="muted">Status interno: ${pct}% concluído</span>
+      </div>
+      <div class="pills"><span class="pill ${approvalClass}">${approval}</span></div>
+    </div>
+
     <div class="content-progress"><span style="width:${pct}%"></span></div>
+
+    ${item.postDate?field('Data de postagem','postDate',formatDateBR(item.postDate)):''}
+    ${item.week?field('Semana do mês','week',item.week):''}
+    ${item.itemStatus?field('Status do conteúdo','itemStatus',item.itemStatus):''}
+
     ${item.driveLink?`<div class="content-box"><label>Link Drive</label><div class="readonly-box"><a href="${item.driveLink}" target="_blank" rel="noopener">Abrir Drive</a></div></div>`:''}
+
     ${field('Tema','tema',item.fields?.tema)}
+
     ${item.type==='roteiro'?`${field('Objetivo','objetivo',item.fields?.objetivo)}${field('Gancho','gancho',item.fields?.gancho)}${field('Desenvolvimento','desenvolvimento',item.fields?.desenvolvimento)}${field('CTA','cta',item.fields?.cta)}`:''}
     ${item.type==='carrossel'?`${field('Objetivo','objetivo',item.fields?.objetivo)}${field('Slides','slides',item.fields?.slides)}${field('Legenda','legenda',item.fields?.legenda)}${field('CTA','cta',item.fields?.cta)}`:''}
     ${item.type==='estatico'?`${field('Mensagem principal','mensagem',item.fields?.mensagem)}${field('Legenda','legenda',item.fields?.legenda)}${field('CTA','cta',item.fields?.cta)}`:''}
-    <label>Observação do cliente sobre este conteúdo</label>
-    <textarea data-field="note" oninput="autoGrow(this)" placeholder="Escreva aqui se precisar ajustar algo neste conteúdo.">${item.note||''}</textarea>
-  </div>`
+
+    <div class="client-decision-box">
+      <label>Decisão deste conteúdo</label>
+      <div class="pills"><span class="pill ${approvalClass}">${approval}</span></div>
+
+      <label>Comentário para ajuste</label>
+      <textarea id="client_adjust_note_${item.id}" oninput="autoGrow(this)" placeholder="Se pedir ajuste, escreva aqui o que precisa mudar neste conteúdo.">${item.clientNote||''}</textarea>
+
+      <div class="actions">
+        <button class="btn-green" onclick="approveCreativeItem('${item.id}')">Aprovar este item</button>
+        <button class="btn-yellow" onclick="requestCreativeAdjust('${item.id}')">Solicitar ajuste</button>
+      </div>
+    </div>
+  </div>`;
 }
+
 function renderProjectDetail(c,p){return`<div id="projectDetail">
   <div class="client-toolbar"><button class="btn-dark" onclick="goToProjects()">← Voltar para projetos</button></div>
   <div class="stage"><div class="stage-head"><div><h2>Projeto ${p.period}</h2><p>Você pode visualizar, aprovar ou solicitar ajustes. A produção interna fica bloqueada para edição.</p></div><span class="pill">${progress(p)}%</span></div><div class="flow"><div class="step ${stepClass(p.strategicStatus)}"><b>01 Planejamento</b><br>${p.strategicStatus}</div><div class="step ${stepClass(p.productionStatus)}"><b>02 Desenvolvimento</b><br>${p.productionStatus}</div><div class="step ${stepClass(p.calendarStatus)}"><b>03 Calendário</b><br>${p.calendarStatus}</div><div class="step ${stepClass(p.approvalStatus)}"><b>04 Aprovações</b><br>${p.approvalStatus}</div></div></div>
@@ -185,7 +214,14 @@ function renderAutoCalendar(p){
 }
 
 function stageCalendar(p){return`<div class="stage ${!stageVisible(p.calendarStatus)?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Salvar como PDF</button></div><p>Datas, formatos e temas organizados.</p></div>${statusPill(p.calendarStatus)}</div>${!stageVisible(p.calendarStatus)?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`<div class="content-box"><label>Calendário automático</label>${renderAutoCalendar(p)}</div>${field('Observações do calendário','calendar_content',p.calendar?.content)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes sobre o calendário.">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button><button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button></div>`}</div>`}
-function getForm(p){let g=id=>document.getElementById(id)?.value;let items=(p.production?.items||[]).map(item=>{let box=document.querySelector(`[data-item="${item.id}"]`);if(box){let note=box.querySelector('[data-field="note"]')?.value||item.note||'';return{...item,note}}return item});return{strategic:{...p.strategic,note:g('strategic_note')??p.strategic?.note??''},production:{...p.production,items,note:g('production_note')??p.production?.note??''},calendar:{...p.calendar,note:g('calendar_note')??p.calendar?.note??''}}}
+function getForm(p){
+  let g=id=>document.getElementById(id)?.value;
+  return {
+    strategic:{...p.strategic,note:g('strategic_note')??p.strategic?.note??''},
+    production:{...p.production,note:g('production_note')??p.production?.note??''},
+    calendar:{...p.calendar,note:g('calendar_note')??p.calendar?.note??''}
+  };
+}
 function addH(p,t){return[new Date().toLocaleString('pt-BR')+' • '+t,...(p.history||[])]}
 async function save(extra={}){let p=currentProject();await updateDoc(doc(db,'hubProjects',p.id),{...getForm(p),...extra,updatedAt:serverTimestamp()})}
 function send(c,msg){if(!c.responsiblePhone)return;window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank')}
