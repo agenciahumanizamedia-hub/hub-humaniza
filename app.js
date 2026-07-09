@@ -339,6 +339,27 @@ async function approveProduction(){let c=currentClient(),p=currentProject();awai
 async function approveCalendar(){let c=currentClient(),p=currentProject();await saveProjectExtra({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.')});send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);await loadData()}
 async function requestAdjust(type){let c=currentClient(),p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};await saveProjectExtra({[map[type][0]]:'Ajustes solicitados',history:addHistory(p,'Ajustes solicitados em '+map[type][1]+'.')});send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
 async function deleteClient(id){if(!confirm('Excluir cliente e todos os projetos dele?'))return;for(let p of projects.filter(p=>p.clientId===id))await deleteDoc(doc(db,'hubProjects',p.id));await deleteDoc(doc(db,'hubClients',id));selectedClientId=null;selectedProjectId=null;await loadData()}
-function copyClientLink(){let c=currentClient();if(!c)return;let link=window.location.origin+'/cliente.html?id='+c.id;navigator.clipboard?.writeText(link);alert('Link do cliente copiado: '+link)}
-function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+function copyClientLink(){
+  const c = currentClient();
+
+  if(!c){
+    alert('Nenhum cliente selecionado.');
+    return;
+  }
+
+  const DOMINIO_OFICIAL = 'https://humaniza-phi.vercel.app';
+  const link = DOMINIO_OFICIAL + '/cliente.html?id=' + encodeURIComponent(c.id);
+
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(link)
+      .then(() => {
+        alert('Link do cliente copiado:\n\n' + link);
+      })
+      .catch(() => {
+        prompt('Copie o link do cliente:', link);
+      });
+  } else {
+    prompt('Copie o link do cliente:', link);
+  }
+}function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
 startRealtime();
