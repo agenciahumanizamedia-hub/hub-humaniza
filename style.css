@@ -278,3 +278,21 @@
     display:block!important;
   }
 }
+
+/* v1.3.9 aprovação por item na visão do cliente */
+.client-approval-box{
+  background:#fff;
+  border:1px solid #ddd;
+  border-radius:14px;
+  padding:12px;
+  margin-top:12px;
+}
+.client-approval-box .actions{
+  margin-bottom:0;
+}
+@media(max-width:650px){
+  .client-approval-box .actions{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+}
