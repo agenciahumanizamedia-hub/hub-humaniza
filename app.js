@@ -183,9 +183,6 @@ function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clien
 function renderWorkspace(){let c=currentClient();if(!c){workspace.innerHTML='<div class="empty">Cadastre ou selecione um cliente.</div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p></div><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div><div class="actions"><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button>
         <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
         <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
-        <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button>
-        <button class="btn-dark" onclick="printFullProject()">Salvar projeto em PDF</button>
-        <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
         <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button></div></div>${renderProjects(c)}${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`}
 function renderProjects(c){let list=projects.filter(p=>p.clientId===c.id);if(!list.length)return'';return`<div class="project-list">${list.map(x=>`<div class="project-card ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}</div>`}
 function stepClass(s){if(s==='Aprovado')return'done';if(s==='Bloqueado')return'locked';return'active'}
@@ -361,5 +358,6 @@ function copyClientLink(){
   } else {
     prompt('Copie o link do cliente:', link);
   }
-}function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+}
+function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
 startRealtime();
