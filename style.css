@@ -121,3 +121,160 @@
     text-align:center;
   }
 }
+
+
+/* v1.3.6 data, semana e impressão */
+.content-item input[type="date"],
+.content-item select{
+  width:100%;
+  background:#fff;
+  color:#1C1C1C;
+  border:1px solid #ddd;
+  border-radius:12px;
+  padding:12px;
+  font-size:15px;
+}
+@media print{
+  body{background:#fff!important;color:#111!important}
+  header,.header,.admin-control-panel,.dashboard,.panel:first-child,.actions,.no-print,button,.rich-toolbar,.stage-control{display:none!important}
+  main{width:100%!important;margin:0!important}
+  .layout{display:block!important}
+  .stage,.content-item,.content-box,.readonly-box{
+    break-inside:avoid;
+    page-break-inside:avoid;
+    background:#fff!important;
+    color:#111!important;
+    border:1px solid #ddd!important;
+    box-shadow:none!important;
+  }
+  .rich-editor{border:0!important;padding:0!important}
+  a{color:#111!important;text-decoration:none!important}
+}
+
+
+/* v1.3.7 calendário automático */
+.auto-calendar{display:flex;flex-direction:column;gap:10px}
+.calendar-row{display:grid;grid-template-columns:160px 1fr 190px;gap:12px;align-items:center;background:#fff;color:#1C1C1C;border:1px solid #ddd;border-radius:14px;padding:12px}
+.calendar-row strong{display:block}
+.calendar-row span{display:block;color:#666;font-size:13px;margin-top:3px}
+.calendar-status{display:inline-block!important;padding:7px 10px;border-radius:999px;font-size:12px!important;font-weight:900;color:#1C1C1C!important;background:#eee}
+.calendar-status.em-criação{background:#ECEBFF;color:#342ee8!important}
+.calendar-status.aguardando-aprovação{background:#FFF1D6;color:#9A6500!important}
+.calendar-status.aprovado{background:#DDF7EA;color:#176A42!important}
+.calendar-status.ajustes{background:#FFE1E1;color:#9B2D2D!important}
+.calendar-status.postado{background:#DDF7EA;color:#176A42!important}
+@media(max-width:760px){.calendar-row{grid-template-columns:1fr}}
+@media print{.auto-calendar,.calendar-row{break-inside:avoid}}
+
+
+/* v1.3.8 impressão e PDF */
+@media print{
+  @page{margin:14mm}
+  body{
+    background:#fff!important;
+    color:#111!important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+  header,.header,.actions,.no-print,button,.admin-control-panel,.stage-control,.rich-toolbar,.dashboard,.panel:first-child{
+    display:none!important;
+  }
+  main{
+    width:100%!important;
+    margin:0!important;
+  }
+  .layout{
+    display:block!important;
+  }
+  .stage,.content-item,.content-box,.readonly-box,.auto-calendar,.calendar-row{
+    background:#fff!important;
+    color:#111!important;
+    border:1px solid #ddd!important;
+    box-shadow:none!important;
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+  .stage{
+    margin-bottom:16px!important;
+  }
+  .rich-editor{
+    border:0!important;
+    padding:0!important;
+    background:#fff!important;
+    color:#111!important;
+  }
+  a{color:#111!important;text-decoration:none!important}
+  body[data-print-mode="development"] .stage{
+    display:none!important;
+  }
+  body[data-print-mode="development"] .stage:has(.content-item){
+    display:block!important;
+  }
+  body[data-print-mode="calendar"] .stage{
+    display:none!important;
+  }
+  body[data-print-mode="calendar"] .stage:has(.auto-calendar){
+    display:block!important;
+  }
+  body[data-print-mode="full"] .stage{
+    display:block!important;
+  }
+  body[data-print-mode="full"] .panel{
+    display:none!important;
+  }
+}
+
+
+/* ajuste final impressão separada */
+@media print{
+  @page{margin:14mm}
+  body{
+    background:#fff!important;
+    color:#111!important;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+  header,.header,.actions,.no-print,button,.admin-control-panel,.stage-control,.rich-toolbar,.dashboard,.panel:first-child{
+    display:none!important;
+  }
+  main{
+    width:100%!important;
+    margin:0!important;
+  }
+  .layout{
+    display:block!important;
+  }
+  .stage,.content-item,.content-box,.readonly-box,.auto-calendar,.calendar-row,.client-hero{
+    background:#fff!important;
+    color:#111!important;
+    border:1px solid #ddd!important;
+    box-shadow:none!important;
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+  .rich-editor{
+    border:0!important;
+    padding:0!important;
+    background:#fff!important;
+    color:#111!important;
+  }
+  a{color:#111!important;text-decoration:none!important}
+
+  body[data-print-mode="development"] .stage{
+    display:none!important;
+  }
+  body[data-print-mode="development"] .stage:has(.content-item){
+    display:block!important;
+  }
+
+  body[data-print-mode="calendar"] .stage{
+    display:none!important;
+  }
+  body[data-print-mode="calendar"] .stage:has(.auto-calendar){
+    display:block!important;
+  }
+
+  body[data-print-mode="full"] .stage{
+    display:block!important;
+  }
+}
