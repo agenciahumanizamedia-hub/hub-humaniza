@@ -3,6 +3,13 @@ function projectAccessBlocked(p){return p?.projectAccess==='Bloqueado'||p?.proje
 function stageVisible(status){return ['Liberado ao cliente','Aguardando aprovação','Aprovado','Finalizado','Em desenvolvimento','Em andamento'].includes(status);}
 import { db, getDoc, getDocs, doc, updateDoc, collection, query, where, serverTimestamp, onSnapshot } from "./firebase.js";
 
+function setPrintMode(mode){
+  document.body.setAttribute('data-print-mode', mode);
+  setTimeout(()=>window.print(), 120);
+}
+function printDevelopment(){setPrintMode('development');}
+function printCalendar(){setPrintMode('calendar');}
+function printFullProject(){setPrintMode('full');}
 const params=new URLSearchParams(window.location.search);
 let selectedClientId=params.get('id'),client=null,projects=[],selectedProjectId=null;
 
@@ -63,6 +70,7 @@ Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCa
 
 function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'}
 function goToProjects(){document.getElementById('projectNav')?.scrollIntoView({behavior:'smooth',block:'start'})}
+function formatDateBR(v){if(!v)return '';const [y,m,d]=v.split('-');return `${d}/${m}/${y}`;}
 function statusPill(s){if(s==='Aprovado')return'<span class="pill green">Aprovado</span>';if(s==='Ajustes solicitados')return'<span class="pill yellow">Ajustes</span>';if(s==='Bloqueado')return'<span class="pill lock">Bloqueado</span>';if(s==='Em andamento'||s==='Em desenvolvimento')return'<span class="pill purple">'+s+'</span>';return'<span class="pill yellow">'+s+'</span>'}
 function progress(p){let n=0;if(p.strategicStatus==='Aprovado')n+=25;if(p.productionStatus==='Aprovado')n+=25;if(p.calendarStatus==='Aprovado')n+=25;if(p.approvalStatus==='Finalizado')n+=25;return n}
 function stepClass(s){if(s==='Aprovado')return'done';if(s==='Bloqueado')return'locked';return'active'}
@@ -104,8 +112,33 @@ function renderProjectDetail(c,p){return`<div id="projectDetail">
   <div class="stage"><h2>Histórico</h2><p class="muted">Registro das últimas ações.</p><div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div></div>
   </div>`}
 function stageStrategic(p){return`<div class="stage"><div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>Revise o planejamento antes de aprovar.</p></div>${statusPill(p.strategicStatus)}</div><div class="content-grid">${field('Visão Macro','strategic_macro',p.strategic?.macro)}${field('Linha Editorial','strategic_editorial',p.strategic?.editorial)}${field('Temas do mês','strategic_themes',p.strategic?.themes)}${field('Direção Criativa','strategic_creative',p.strategic?.creative)}</div><label>Observações do cliente</label><textarea class="note" id="strategic_note" oninput="autoGrow(this)" placeholder="Escreva aqui o que deseja ajustar no planejamento.">${p.strategic?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button><button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button></div></div>`}
-function stageProduction(p){let items=p.production?.items||[];return`<div class="stage ${!stageVisible(p.productionStatus)?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>Visualização dos roteiros, carrosséis e estáticos. O checklist é interno da Humaniza.</p></div>${statusPill(p.productionStatus)}</div>${!stageVisible(p.productionStatus)?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes gerais sobre os conteúdos.">${p.production?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button><button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button></div>`}</div>`}
-function stageCalendar(p){return`<div class="stage ${!stageVisible(p.calendarStatus)?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><p>Datas, formatos e temas organizados.</p></div>${statusPill(p.calendarStatus)}</div>${!stageVisible(p.calendarStatus)?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`${field('Calendário Editorial','calendar_content',p.calendar?.content)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes sobre o calendário.">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button><button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button></div>`}</div>`}
+function stageProduction(p){let items=p.production?.items||[];return`<div class="stage ${!stageVisible(p.productionStatus)?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Imprimir desenvolvimento</button></div><p>Visualização dos roteiros, carrosséis e estáticos. O checklist é interno da Humaniza.</p></div>${statusPill(p.productionStatus)}</div>${!stageVisible(p.productionStatus)?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes gerais sobre os conteúdos.">${p.production?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button><button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button></div>`}</div>`}
+
+function itemFormatLabel(type){return type==='roteiro'?'🎬 Roteiro':type==='carrossel'?'📚 Carrossel':'🖼️ Estático';}
+function calendarItemsFromProduction(p){
+  const items=p.production?.items||[];
+  return items.map(item=>({
+    id:item.id,
+    date:item.postDate||'',
+    week:item.week||'',
+    format:itemFormatLabel(item.type),
+    theme:(item.fields?.tema||'Sem tema').replace(/<[^>]*>/g,''),
+    status:item.itemStatus||'Em criação'
+  })).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
+}
+function renderAutoCalendar(p){
+  const list=calendarItemsFromProduction(p);
+  if(!list.length)return '<div class="empty">Nenhum conteúdo com data disponível.</div>';
+  return `<div class="auto-calendar">
+    ${list.map(item=>`<div class="calendar-row">
+      <div><strong>${formatDateBR(item.date)}</strong><span>${item.week||''}</span></div>
+      <div><strong>${item.format}</strong><span>${item.theme}</span></div>
+      <div><span class="calendar-status ${item.status.replaceAll(' ','-').toLowerCase()}">${item.status}</span></div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function stageCalendar(p){return`<div class="stage ${!stageVisible(p.calendarStatus)?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Salvar como PDF</button></div><p>Datas, formatos e temas organizados.</p></div>${statusPill(p.calendarStatus)}</div>${!stageVisible(p.calendarStatus)?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`<div class="content-box"><label>Calendário automático</label>${renderAutoCalendar(p)}</div>${field('Observações do calendário','calendar_content',p.calendar?.content)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes sobre o calendário.">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button><button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button></div>`}</div>`}
 function getForm(p){let g=id=>document.getElementById(id)?.value;let items=(p.production?.items||[]).map(item=>{let box=document.querySelector(`[data-item="${item.id}"]`);if(box){let note=box.querySelector('[data-field="note"]')?.value||item.note||'';return{...item,note}}return item});return{strategic:{...p.strategic,note:g('strategic_note')??p.strategic?.note??''},production:{...p.production,items,note:g('production_note')??p.production?.note??''},calendar:{...p.calendar,note:g('calendar_note')??p.calendar?.note??''}}}
 function addH(p,t){return[new Date().toLocaleString('pt-BR')+' • '+t,...(p.history||[])]}
 async function save(extra={}){let p=currentProject();await updateDoc(doc(db,'hubProjects',p.id),{...getForm(p),...extra,updatedAt:serverTimestamp()})}
@@ -115,5 +148,10 @@ async function approveProduction(){let p=currentProject();await save({production
 async function approveCalendar(){let p=currentProject();await save({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addH(p,'Cliente aprovou o Calendário.')});send(client,`✅ CALENDÁRIO APROVADO\n\nCliente: ${client.name}\nProjeto: ${p.period}`);await loadData()}
 async function requestAdjust(type){let p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento Criativo'],calendar:['calendarStatus','Calendário']};await save({[map[type][0]]:'Ajustes solicitados',history:addH(p,'Cliente solicitou ajustes em '+map[type][1]+'.')});send(client,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${client.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
 function projectLockedLabel(i){return i===0?'Próximo mês':'Em breve'}
-function renderClientPortal(){let box=document.getElementById('clientPortal');if(client.access==='Bloqueado'){box.innerHTML='<div class="empty">Acesso bloqueado temporariamente.</div>';return}let p=currentProject()||projects[0];if(p)selectedProjectId=p.id;box.innerHTML=`<div class="client-hero"><h1>Olá, ${client.name}</h1><p class="muted">Aqui você acompanha seus projetos, aprova etapas ou solicita ajustes.</p><div class="pills"><span class="pill">${client.status}</span><span class="pill">${client.access}</span></div></div><div id="projectNav" class="stage"><h2>Projetos disponíveis</h2><p class="muted">Toque em um projeto para visualizar. Os próximos ficam bloqueados até liberação da Humaniza.</p><div class="client-projects">${projects.map(x=>`<div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}<div class="client-project locked-card"><h3>Próximo projeto</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(0)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div><div class="client-project locked-card"><h3>Projeto futuro</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(1)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div></div></div>${p?renderProjectDetail(client,p):'<div class="empty">Nenhum projeto disponível.</div>'}`;setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+function renderClientPortal(){let box=document.getElementById('clientPortal');if(client.access==='Bloqueado'){box.innerHTML='<div class="empty">Acesso bloqueado temporariamente.</div>';return}let p=currentProject()||projects[0];if(p)selectedProjectId=p.id;box.innerHTML=`<div class="client-hero"><h1>Olá, ${client.name}</h1><p class="muted">Aqui você acompanha seus projetos, aprova etapas ou solicita ajustes.</p><div class="pills"><span class="pill">${client.status}</span><span class="pill">${client.access}</span></div>
+      <div class="actions no-print">
+        <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
+        <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
+        <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button>
+      </div></div><div id="projectNav" class="stage"><h2>Projetos disponíveis</h2><p class="muted">Toque em um projeto para visualizar. Os próximos ficam bloqueados até liberação da Humaniza.</p><div class="client-projects">${projects.map(x=>`<div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}<div class="client-project locked-card"><h3>Próximo projeto</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(0)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div><div class="client-project locked-card"><h3>Projeto futuro</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(1)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div></div></div>${p?renderProjectDetail(client,p):'<div class="empty">Nenhum projeto disponível.</div>'}`;setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
 startClientRealtime();
