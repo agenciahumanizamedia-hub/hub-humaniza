@@ -301,10 +301,13 @@ function controlSelect(label,value,onchange,options){
 }
 function adminControls(c,p){
   return `<div class="admin-control-panel">
-    <div class="control-head"><h3>Controle de acesso e status</h3><p>Você decide o que o cliente pode visualizar.</p></div>
+    <div class="control-head">
+      <h3>Controle de acesso e status</h3>
+      <p>Você decide o que o cliente pode visualizar.</p>
+    </div>
     <div class="control-grid">
-      ${controlSelect('Cliente',c.clientState||'Ativo',`updateClientControl('clientState',this.value)`,['Ativo','Pausado','Finalizado'])}
-      ${controlSelect('Acesso do cliente',c.accessState||'Liberado',`updateClientControl('accessState',this.value)`,['Liberado','Bloqueado'])}
+      ${controlSelect('Status do cliente',c.status||'Ativo',`updateClientControl('status',this.value)`,['Ativo','Pausado','Finalizado'])}
+      ${controlSelect('Acesso do cliente',c.access||'Liberado',`updateClientControl('access',this.value)`,['Liberado','Bloqueado'])}
       ${controlSelect('Projeto',p.projectState||'Em andamento',`updateProjectControl('projectState',this.value)`,['Rascunho','Em andamento','Aguardando cliente','Aprovado','Finalizado','Bloqueado'])}
       ${controlSelect('Visibilidade do projeto',p.projectAccess||'Liberado',`updateProjectControl('projectAccess',this.value)`,['Liberado','Bloqueado'])}
     </div>
