@@ -1,6 +1,6 @@
 import { db, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from "./firebase.js";
 
-let clients=[], projects=[], selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null;
+let clients=[], projects=[], briefingQuestions=[], briefingAnswers=[], selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null;
 
 let realtimeReady=false;
 function showRealtimeNotice(){
@@ -49,10 +49,18 @@ function startRealtime(){
     console.error('Erro tempo real projetos:',err);
     alert('Erro ao acompanhar projetos em tempo real: '+(err.message||err));
   });
+  onSnapshot(collection(db,'hubBriefingQuestions'),snap=>{
+    briefingQuestions=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+    render();
+  },err=>console.error('Erro ao acompanhar perguntas do briefing:',err));
+  onSnapshot(collection(db,'hubBriefingAnswers'),snap=>{
+    briefingAnswers=snap.docs.map(d=>({id:d.id,...d.data()}));
+    render();
+  },err=>console.error('Erro ao acompanhar respostas do briefing:',err));
 }
 
 
-Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode});
+Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode,addBriefingQuestion,editBriefingQuestion,deleteBriefingQuestion,toggleBriefingQuestion,moveBriefingQuestion,releaseBriefingEdit,lockBriefingEdit,createRecommendedBriefingQuestions});
 
 function setPrintMode(mode){
   document.body.setAttribute('data-print-mode', mode);
@@ -266,29 +274,104 @@ function clearAdminContentFilters(scope='admin'){
   applyAdminContentFilters(scope);
 }
 
+function escapeHtml(value){
+  return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+function questionTypeLabel(type){
+  return ({text:'Resposta curta',textarea:'Resposta longa',number:'Número',date:'Data',url:'Link',yesno:'Sim ou não'})[type]||'Resposta longa';
+}
+function questionsForClient(clientId){
+  return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===clientId)).sort((a,b)=>(a.order||0)-(b.order||0));
+}
+function latestBriefingAnswer(clientId){
+  return briefingAnswers.filter(a=>a.clientId===clientId).sort((a,b)=>(b.version||0)-(a.version||0))[0]||null;
+}
+function renderAnswerValue(value){
+  if(value===undefined||value===null||value==='')return 'Não informado';
+  return escapeHtml(value).replace(/\n/g,'<br>');
+}
 function renderBriefingAdmin(c){
-  const briefing=c.briefing||{};
-  const answered=c.briefingStatus==='Respondido';
+  const questions=briefingQuestions.filter(q=>!q.clientId||q.clientId===c.id).sort((a,b)=>(a.order||0)-(b.order||0));
+  const latest=latestBriefingAnswer(c.id);
+  const answered=c.briefingStatus==='Respondido'||!!latest;
+  const editAllowed=c.briefingEditAllowed===true;
+  const status=editAllowed?'Liberado para edição':answered?'Respondido e bloqueado':'Pendente';
+  const statusClass=editAllowed?'purple':answered?'green':'yellow';
   return `<div class="stage">
     <div class="stage-head">
-      <div>
-        <h2>Briefing do cliente</h2>
-        <p>${answered?'As respostas estão vinculadas a este cadastro.':'Envie o link exclusivo para o cliente responder.'}</p>
-      </div>
-      <span class="pill ${answered?'green':'yellow'}">${answered?'Respondido':'Pendente'}</span>
+      <div><h2>Briefing do cliente</h2><p>O briefing pertence a ${escapeHtml(c.name)} e fica bloqueado após cada envio.</p></div>
+      <span class="pill ${statusClass}">${status}</span>
     </div>
-    ${answered?`<div class="content-grid">
-      <div class="content-box"><label>Principal objetivo</label><div class="readonly-box">${briefing.mainGoal||'Não informado'}</div></div>
-      <div class="content-box"><label>Serviços ou produtos em destaque</label><div class="readonly-box">${briefing.services||'Não informado'}</div></div>
-      <div class="content-box"><label>Público que deseja alcançar</label><div class="readonly-box">${briefing.audience||'Não informado'}</div></div>
-      <div class="content-box"><label>Como a marca deve ser percebida</label><div class="readonly-box">${briefing.brandPosition||'Não informado'}</div></div>
-      <div class="content-box"><label>Diferenciais</label><div class="readonly-box">${briefing.differentials||'Não informado'}</div></div>
-      <div class="content-box"><label>Referências ou concorrentes</label><div class="readonly-box">${briefing.references||'Não informado'}</div></div>
-    </div>`:''}
     <div class="actions">
       <button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
+      ${answered&&!editAllowed?'<button class="btn-green" onclick="releaseBriefingEdit()">Liberar nova edição</button>':''}
+      ${editAllowed?'<button class="btn-yellow" onclick="lockBriefingEdit()">Bloquear edição</button>':''}
+      <button onclick="addBriefingQuestion()">+ Adicionar pergunta</button>
+      ${!briefingQuestions.length?'<button class="btn-dark" onclick="createRecommendedBriefingQuestions()">Criar perguntas recomendadas</button>':''}
     </div>
+    <div class="admin-control-panel">
+      <div class="control-head"><h3>Gerenciar perguntas</h3><p>Somente o administrador pode criar, editar, excluir e reorganizar perguntas.</p></div>
+      ${questions.length?questions.map((q,index)=>`<div class="content-box">
+        <label>${index+1}. ${escapeHtml(q.text)}</label>
+        ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
+        <div class="pills"><span class="pill">${questionTypeLabel(q.type)}</span><span class="pill ${q.required!==false?'green':'yellow'}">${q.required!==false?'Obrigatória':'Opcional'}</span><span class="pill ${q.active!==false?'purple':'lock'}">${q.active!==false?'Ativa':'Desativada'}</span><span class="pill">${q.clientId?'Somente este cliente':'Todos os clientes'}</span></div>
+        <div class="actions"><button class="btn-dark" onclick="editBriefingQuestion('${q.id}')">Editar</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',-1)">Subir</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',1)">Descer</button><button class="btn-yellow" onclick="toggleBriefingQuestion('${q.id}')">${q.active!==false?'Desativar':'Ativar'}</button><button class="btn-danger" onclick="deleteBriefingQuestion('${q.id}')">Excluir</button></div>
+      </div>`).join(''):'<div class="empty">Nenhuma pergunta cadastrada.</div>'}
+    </div>
+    ${latest?`<div class="content-grid">${questionsForClient(c.id).map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${renderAnswerValue(latest.answers?.[q.id])}</div></div>`).join('')}</div><p class="muted">Versão ${latest.version||1} • Enviado em ${escapeHtml(latest.answeredAt||'data não informada')}</p>`:''}
   </div>`;
+}
+
+async function addBriefingQuestion(){
+  const c=currentClient(); if(!c)return;
+  const text=prompt('Digite a pergunta:'); if(!text?.trim())return;
+  const description=prompt('Orientação opcional para o cliente:')||'';
+  const type=(prompt('Tipo: text, textarea, number, date, url ou yesno','textarea')||'textarea').toLowerCase();
+  const required=confirm('Essa pergunta será obrigatória?');
+  const onlyClient=confirm('Esta pergunta deve aparecer somente para o cliente selecionado?');
+  const maxOrder=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
+  await addDoc(collection(db,'hubBriefingQuestions'),{text:text.trim(),description:description.trim(),type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,active:true,clientId:onlyClient?c.id:null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+}
+async function editBriefingQuestion(id){
+  const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
+  const text=prompt('Edite a pergunta:',q.text); if(!text?.trim())return;
+  const description=prompt('Edite a orientação:',q.description||'')||'';
+  const type=(prompt('Tipo: text, textarea, number, date, url ou yesno',q.type||'textarea')||q.type||'textarea').toLowerCase();
+  const required=confirm('Clique em OK para obrigatória ou Cancelar para opcional.');
+  await updateDoc(doc(db,'hubBriefingQuestions',id),{text:text.trim(),description:description.trim(),type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,updatedAt:serverTimestamp()});
+}
+async function deleteBriefingQuestion(id){
+  if(!confirm('Excluir esta pergunta? As respostas antigas continuarão preservadas no histórico.'))return;
+  await deleteDoc(doc(db,'hubBriefingQuestions',id));
+}
+async function toggleBriefingQuestion(id){
+  const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
+  await updateDoc(doc(db,'hubBriefingQuestions',id),{active:q.active===false,updatedAt:serverTimestamp()});
+}
+async function moveBriefingQuestion(id,direction){
+  const ordered=[...briefingQuestions].sort((a,b)=>(a.order||0)-(b.order||0));
+  const index=ordered.findIndex(q=>q.id===id), swap=index+direction;
+  if(index<0||swap<0||swap>=ordered.length)return;
+  const a=ordered[index],b=ordered[swap],ao=a.order||index+1,bo=b.order||swap+1;
+  await Promise.all([updateDoc(doc(db,'hubBriefingQuestions',a.id),{order:bo,updatedAt:serverTimestamp()}),updateDoc(doc(db,'hubBriefingQuestions',b.id),{order:ao,updatedAt:serverTimestamp()})]);
+}
+async function releaseBriefingEdit(){
+  const c=currentClient(); if(!c)return;
+  await updateDoc(doc(db,'hubClients',c.id),{briefingEditAllowed:true,briefingStatus:'Liberado para edição',updatedAt:serverTimestamp()});
+  alert('Edição do briefing liberada para este cliente.');
+}
+async function lockBriefingEdit(){
+  const c=currentClient(); if(!c)return;
+  await updateDoc(doc(db,'hubClients',c.id),{briefingEditAllowed:false,briefingStatus:latestBriefingAnswer(c.id)?'Respondido':'Pendente',updatedAt:serverTimestamp()});
+  alert('Edição do briefing bloqueada.');
+}
+async function createRecommendedBriefingQuestions(){
+  const recommended=[
+    ['Nome da empresa','text'],['Nome do responsável','text'],['Qual é o principal objetivo da empresa nas redes sociais?','textarea'],['Qual resultado vocês esperam alcançar nos próximos meses?','textarea'],['Quais serviços ou produtos devem receber mais destaque?','textarea'],['Qual serviço ou produto gera mais resultado para a empresa?','textarea'],['Quem é o público ideal da empresa?','textarea'],['Quais dores, dúvidas e desejos esse público possui?','textarea'],['O que normalmente impede esse público de comprar?','textarea'],['Como a empresa deseja ser percebida?','textarea'],['Quais são os principais diferenciais da empresa?','textarea'],['Por que um cliente deveria escolher a empresa?','textarea'],['Quem são os principais concorrentes ou referências?','textarea'],['Como funciona o processo de atendimento e venda?','textarea'],['Quais são as principais objeções recebidas?','textarea'],['Quem pode aparecer nos conteúdos e vídeos?','textarea'],['Quais dúvidas os clientes mais fazem?','textarea'],['O que já funcionou ou não funcionou no marketing?','textarea'],['Existem datas, campanhas, eventos ou lançamentos importantes?','textarea'],['Existe alguma informação adicional que a equipe precisa saber?','textarea']
+  ];
+  if(!confirm('Criar as perguntas estratégicas recomendadas para todos os clientes?'))return;
+  for(let i=0;i<recommended.length;i++)await addDoc(collection(db,'hubBriefingQuestions'),{text:recommended[i][0],description:'',type:recommended[i][1],required:true,active:true,clientId:null,order:i+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+  alert('Perguntas recomendadas criadas.');
 }
 
 function copyBriefingLink(){
