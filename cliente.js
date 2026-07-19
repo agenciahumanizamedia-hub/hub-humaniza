@@ -233,6 +233,16 @@ function escapeHtml(value){
 function availableBriefingQuestions(){
   return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===selectedClientId)).sort((a,b)=>(a.order||0)-(b.order||0));
 }
+function groupBriefingQuestions(questions){
+  const groups=[];
+  questions.forEach(q=>{
+    const category=String(q.category||'Geral').trim()||'Geral';
+    let group=groups.find(g=>g.category===category);
+    if(!group){group={category,questions:[]};groups.push(group);}
+    group.questions.push(q);
+  });
+  return groups;
+}
 function latestBriefing(){return briefingAnswers[0]||null;}
 function renderBriefingInput(q,value=''){
   const required=q.required!==false?'data-required="1"':'';
@@ -246,25 +256,23 @@ function renderBriefingInput(q,value=''){
 }
 function renderBriefingForm(){
   const questions=availableBriefingQuestions();
+  const grouped=groupBriefingQuestions(questions);
   const latest=latestBriefing();
-  const answered=client?.briefingStatus==='Respondido'||!!latest;
-  const canEdit=!answered||client?.briefingEditAllowed===true;
   const answers=latest?.answers||{};
-  return `<div class="client-hero">
-    <h1>Briefing Humaniza</h1>
-    <p class="muted">Olá, ${escapeHtml(client?.name||'')}. Este briefing pertence ao seu cadastro.</p>
-    <div class="pills"><span class="pill ${canEdit?'purple':'green'}">${canEdit?(answered?'Edição liberada':'Novo briefing'):'Respondido e bloqueado'}</span></div>
-  </div>
-  <div class="stage">
-    ${!questions.length?'<div class="empty">As perguntas do briefing ainda não foram cadastradas pela Humaniza.</div>':canEdit?`<div class="form">${questions.map(q=>`<div class="full"><label>${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}${renderBriefingInput(q,answers[q.id]||'')}</div>`).join('')}</div><div class="actions"><button class="btn-green" onclick="saveBriefing()">Enviar briefing</button></div><p class="muted">Após o envio, as respostas serão bloqueadas. Uma nova edição somente poderá ser liberada pela Humaniza.</p>`:`<div class="content-grid">${questions.map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${escapeHtml(answers[q.id]||'Não informado').replace(/\n/g,'<br>')}</div></div>`).join('')}</div><div class="pills"><span class="pill green">Briefing enviado</span><span class="pill lock">Edição bloqueada</span></div><p class="muted">Para alterar alguma resposta, solicite à Humaniza a liberação de uma nova edição.</p>`}
+  const status=client?.briefingStatus||'Em edição';
+  const canEdit=status==='Liberado'||client?.briefingEditAllowed===true;
+  if(status==='Bloqueado')return `<div class="panel"><div class="stage-head"><div><h2>Briefing estratégico</h2><p class="muted">Olá, ${escapeHtml(client?.name||'')}.</p></div><span class="pill lock">Bloqueado</span></div><div class="empty">O briefing está bloqueado pela Humaniza. Aguarde uma nova liberação.</div></div>`;
+  if(status==='Em edição'&&!canEdit)return `<div class="panel"><div class="stage-head"><div><h2>Briefing estratégico</h2><p class="muted">Olá, ${escapeHtml(client?.name||'')}.</p></div><span class="pill yellow">Em preparação</span></div><div class="empty">A Humaniza ainda está preparando este briefing. Você receberá a liberação quando estiver pronto para responder.</div></div>`;
+  const editableGroups=grouped.map(group=>`<div class="content-box"><h2>${escapeHtml(group.category)}</h2><p class="muted">Responda esta etapa com o máximo de detalhes possível.</p></div><div class="form">${group.questions.map(q=>`<div class="full"><label>${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}${renderBriefingInput(q,answers[q.id]||'')}</div>`).join('')}</div>`).join('');
+  const readonlyGroups=grouped.map(group=>`<div class="content-box"><h2>${escapeHtml(group.category)}</h2></div><div class="content-grid">${group.questions.map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${escapeHtml(answers[q.id]||'Não informado').replace(/\n/g,'<br>')}</div></div>`).join('')}</div>`).join('');
+  return `<div class="panel">
+    <div class="stage-head"><div><h2>Briefing estratégico</h2><p class="muted">Olá, ${escapeHtml(client?.name||'')}. Suas respostas serão a base do planejamento, conteúdo e campanhas da empresa.</p></div><span class="pill ${canEdit?'purple':'green'}">${canEdit?'Liberado para responder':'Respondido e bloqueado'}</span></div>
+    ${!questions.length?'<div class="empty">As perguntas ainda não foram cadastradas pela Humaniza.</div>':canEdit?`${editableGroups}<div class="actions"><button class="btn-green" onclick="saveBriefing()">Enviar briefing</button></div><p class="muted">Após o envio, as respostas serão bloqueadas. Apenas a Humaniza poderá liberar uma nova edição.</p>`:`${readonlyGroups}<div class="pills"><span class="pill green">Briefing enviado</span><span class="pill lock">Edição bloqueada</span></div>`}
   </div>`;
 }
 
 async function saveBriefing(){
-  if(client?.briefingStatus==='Respondido'&&client?.briefingEditAllowed!==true){
-    alert('Este briefing está bloqueado para edição. Solicite a liberação à Humaniza.');
-    return;
-  }
+  if(client?.briefingStatus!=='Liberado'&&client?.briefingEditAllowed!==true){ alert('Este briefing não está liberado para resposta.'); return; }
   const questions=availableBriefingQuestions();
   const answers={};
   let firstMissing=null;
