@@ -60,7 +60,7 @@ function startRealtime(){
 }
 
 
-Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode,addBriefingQuestion,editBriefingQuestion,deleteBriefingQuestion,toggleBriefingQuestion,moveBriefingQuestion,releaseBriefingEdit,lockBriefingEdit,createRecommendedBriefingQuestions,showBriefingModel,showClientWorkspace});
+Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode,addBriefingQuestion,editBriefingQuestion,deleteBriefingQuestion,toggleBriefingQuestion,moveBriefingQuestion,releaseBriefingEdit,lockBriefingEdit,createRecommendedBriefingQuestions,showBriefingModel,showClientWorkspace,setBriefingStatus,duplicateBriefingQuestion,previewBriefing});
 
 function setPrintMode(mode){
   document.body.setAttribute('data-print-mode', mode);
@@ -280,6 +280,19 @@ function escapeHtml(value){
 function questionTypeLabel(type){
   return ({text:'Resposta curta',textarea:'Resposta longa',number:'Número',date:'Data',url:'Link',yesno:'Sim ou não'})[type]||'Resposta longa';
 }
+function briefingCategoryLabel(category){
+  return String(category||'Geral').trim()||'Geral';
+}
+function groupBriefingQuestions(questions){
+  const groups=[];
+  questions.forEach(q=>{
+    const category=briefingCategoryLabel(q.category);
+    let group=groups.find(g=>g.category===category);
+    if(!group){group={category,questions:[]};groups.push(group);}
+    group.questions.push(q);
+  });
+  return groups;
+}
 function questionsForClient(clientId){
   return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===clientId)).sort((a,b)=>(a.order||0)-(b.order||0));
 }
@@ -328,56 +341,93 @@ function renderAnswerValue(value){
   return escapeHtml(value).replace(/\n/g,'<br>');
 }
 function renderBriefingPreviewInput(q){
-  const disabled='disabled aria-disabled="true"';
-  if(q.type==='text')return `<input ${disabled} placeholder="Resposta curta do cliente">`;
-  if(q.type==='number')return `<input type="number" ${disabled} placeholder="0">`;
-  if(q.type==='date')return `<input type="date" ${disabled}>`;
-  if(q.type==='url')return `<input type="url" ${disabled} placeholder="https://">`;
-  if(q.type==='yesno')return `<select ${disabled}><option>Selecione</option><option>Sim</option><option>Não</option></select>`;
-  return `<textarea ${disabled} placeholder="Resposta do cliente"></textarea>`;
+  if(q.type==='text')return '<input disabled placeholder="Resposta curta do cliente">';
+  if(q.type==='number')return '<input type="number" disabled placeholder="0">';
+  if(q.type==='date')return '<input type="date" disabled>';
+  if(q.type==='url')return '<input type="url" disabled placeholder="https://">';
+  if(q.type==='yesno')return '<select disabled><option>Selecione</option><option>Sim</option><option>Não</option></select>';
+  return '<textarea disabled placeholder="Resposta do cliente"></textarea>';
 }
 function renderBriefingAdmin(c){
   const questions=briefingQuestions.filter(q=>!q.clientId||q.clientId===c.id).sort((a,b)=>(a.order||0)-(b.order||0));
+  const activeQuestions=questions.filter(q=>q.active!==false);
+  const groupedQuestions=groupBriefingQuestions(questions);
+  const groupedActive=groupBriefingQuestions(activeQuestions);
   const latest=latestBriefingAnswer(c.id);
-  const answered=c.briefingStatus==='Respondido'||!!latest;
-  const editAllowed=c.briefingEditAllowed===true;
-  const status=editAllowed?'Liberado para edição':answered?'Respondido e bloqueado':'Pendente';
-  const statusClass=editAllowed?'purple':answered?'green':'yellow';
+  const rawStatus=c.briefingStatus||'Em edição';
+  const status=latest&&rawStatus!=='Liberado'&&rawStatus!=='Em edição'&&rawStatus!=='Bloqueado'?'Respondido':rawStatus;
+  const statusClass=status==='Liberado'?'purple':status==='Respondido'?'green':status==='Bloqueado'?'lock':'yellow';
+  const answeredCount=latest?activeQuestions.filter(q=>String(latest.answers?.[q.id]??'').trim()!=='').length:0;
+  const completion=activeQuestions.length?Math.round((answeredCount/activeQuestions.length)*100):0;
   return `<div class="stage">
     <div class="stage-head">
-      <div><h2>Briefing do cliente</h2><p>Você pode visualizar e editar as perguntas antes de enviar. O cliente apenas responde e nunca pode alterar as perguntas.</p></div>
-      <span class="pill ${statusClass}">${status}</span>
+      <div><h2>Briefing estratégico</h2><p>Revise toda a estrutura antes de liberar. O cliente apenas responde e nunca consegue alterar as perguntas.</p></div>
+      <span class="pill ${statusClass}">${escapeHtml(status)}</span>
+    </div>
+    <div class="content-grid">
+      <div class="content-box"><label>Perguntas cadastradas</label><div class="readonly-box">${questions.length}</div></div>
+      <div class="content-box"><label>Perguntas ativas</label><div class="readonly-box">${activeQuestions.length}</div></div>
+      <div class="content-box"><label>Respondidas</label><div class="readonly-box">${answeredCount}</div></div>
+      <div class="content-box"><label>Preenchimento</label><div class="readonly-box">${completion}%</div></div>
     </div>
     <div class="actions">
-      <button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
-      ${answered&&!editAllowed?'<button class="btn-green" onclick="releaseBriefingEdit()">Liberar nova edição</button>':''}
-      ${editAllowed?'<button class="btn-yellow" onclick="lockBriefingEdit()">Bloquear edição</button>':''}
       <button onclick="addBriefingQuestion()">+ Adicionar pergunta</button>
-      ${!briefingQuestions.length?'<button class="btn-dark" onclick="createRecommendedBriefingQuestions()">Criar perguntas recomendadas</button>':''}
+      <button class="btn-dark" onclick="createRecommendedBriefingQuestions()">Importar briefing estratégico completo</button>
+      <button class="btn-dark" onclick="previewBriefing()">Visualizar como cliente</button>
+      <button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
     </div>
     <div class="admin-control-panel">
-      <div class="control-head"><h3>Gerenciar perguntas</h3><p>Somente o administrador pode criar, editar, excluir e reorganizar perguntas.</p></div>
-      ${questions.length?questions.map((q,index)=>`<div class="content-box">
-        <label>${index+1}. ${escapeHtml(q.text)}</label>
-        ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
-        <div class="pills"><span class="pill">${questionTypeLabel(q.type)}</span><span class="pill ${q.required!==false?'green':'yellow'}">${q.required!==false?'Obrigatória':'Opcional'}</span><span class="pill ${q.active!==false?'purple':'lock'}">${q.active!==false?'Ativa':'Desativada'}</span><span class="pill">${q.clientId?'Somente este cliente':'Todos os clientes'}</span></div>
-        <div class="actions"><button class="btn-dark" onclick="editBriefingQuestion('${q.id}')">Editar</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',-1)">Subir</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',1)">Descer</button><button class="btn-yellow" onclick="toggleBriefingQuestion('${q.id}')">${q.active!==false?'Desativar':'Ativar'}</button><button class="btn-danger" onclick="deleteBriefingQuestion('${q.id}')">Excluir</button></div>
-      </div>`).join(''):'<div class="empty">Nenhuma pergunta cadastrada.</div>'}
-    </div>
-    <div class="admin-control-panel">
-      <div class="control-head">
-        <h3>Pré-visualização antes de enviar ao cliente</h3>
-        <p>Abaixo está exatamente a lista de perguntas ativas que o cliente verá. Os campos estão bloqueados nesta tela porque esta é apenas uma visualização.</p>
+      <div class="control-head"><h3>Controle de acesso</h3><p>O link só deve ser enviado quando o status estiver como Liberado.</p></div>
+      <div class="actions">
+        <button class="btn-yellow" onclick="setBriefingStatus('Em edição')">Manter em edição</button>
+        <button class="btn-green" onclick="setBriefingStatus('Liberado')">Liberar para responder</button>
+        <button class="btn-danger" onclick="setBriefingStatus('Bloqueado')">Bloquear acesso</button>
       </div>
-      ${questionsForClient(c.id).length?`<div class="form">${questionsForClient(c.id).map((q,index)=>`<div class="full content-box">
-        <label>${index+1}. ${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>
-        ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
-        ${renderBriefingPreviewInput(q)}
-      </div>`).join('')}</div>
-      <div class="pills"><span class="pill green">Perguntas visíveis ao cliente</span><span class="pill lock">Cliente não edita perguntas</span></div>`:'<div class="empty">Nenhuma pergunta ativa será exibida ao cliente. Ative ou cadastre perguntas antes de copiar o link.</div>'}
+      <div class="pills"><span class="pill yellow">Em edição: cliente aguarda</span><span class="pill purple">Liberado: cliente responde</span><span class="pill green">Respondido: envio concluído</span><span class="pill lock">Bloqueado: acesso fechado</span></div>
     </div>
-    ${latest?`<div class="content-grid">${questionsForClient(c.id).map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${renderAnswerValue(latest.answers?.[q.id])}</div></div>`).join('')}</div><p class="muted">Versão ${latest.version||1} • Enviado em ${escapeHtml(latest.answeredAt||'data não informada')}</p>`:''}
+    <div class="admin-control-panel">
+      <div class="control-head"><h3>Gerenciar perguntas</h3><p>As perguntas estão separadas por etapa estratégica. Você pode editar, duplicar, reordenar, desativar ou excluir sem alterar o restante do portal.</p></div>
+      ${questions.length?groupedQuestions.map(group=>`<div class="content-box"><h3>${escapeHtml(group.category)}</h3><p class="muted">${group.questions.length} pergunta(s) nesta etapa.</p></div>${group.questions.map((q,index)=>`<div class="content-box">
+        <label>${escapeHtml(q.text)}</label>
+        ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
+        <div class="pills"><span class="pill">${escapeHtml(group.category)}</span><span class="pill">${questionTypeLabel(q.type)}</span><span class="pill ${q.required!==false?'green':'yellow'}">${q.required!==false?'Obrigatória':'Opcional'}</span><span class="pill ${q.active!==false?'purple':'lock'}">${q.active!==false?'Ativa':'Desativada'}</span></div>
+        <div class="actions"><button class="btn-dark" onclick="editBriefingQuestion('${q.id}')">Editar</button><button class="btn-dark" onclick="duplicateBriefingQuestion('${q.id}')">Duplicar</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',-1)">Subir</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',1)">Descer</button><button class="btn-yellow" onclick="toggleBriefingQuestion('${q.id}')">${q.active!==false?'Desativar':'Ativar'}</button><button class="btn-danger" onclick="deleteBriefingQuestion('${q.id}')">Excluir</button></div>
+      </div>`).join('')}`).join(''):'<div class="empty">Nenhuma pergunta cadastrada. Clique em “Importar briefing estratégico completo”.</div>'}
+    </div>
+    <div class="admin-control-panel">
+      <div class="control-head"><h3>Prévia real antes de enviar</h3><p>Esta é a ordem e a estrutura que o cliente verá. Os campos aparecem bloqueados somente nesta visualização administrativa.</p></div>
+      ${activeQuestions.length?groupedActive.map(group=>`<div class="content-box"><h3>${escapeHtml(group.category)}</h3></div><div class="form">${group.questions.map((q,index)=>`<div class="full content-box"><label>${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}${renderBriefingPreviewInput(q)}</div>`).join('')}</div>`).join(''):'<div class="empty">Nenhuma pergunta ativa será exibida ao cliente.</div>'}
+    </div>
+    ${latest?`<div class="admin-control-panel"><div class="control-head"><h3>Últimas respostas recebidas</h3><p>Versão ${latest.version||1} • Enviado em ${escapeHtml(latest.answeredAt||'data não informada')}</p></div>${groupedActive.map(group=>`<div class="content-box"><h3>${escapeHtml(group.category)}</h3></div><div class="content-grid">${group.questions.map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${renderAnswerValue(latest.answers?.[q.id])}</div></div>`).join('')}</div>`).join('')}</div>`:''}
   </div>`;
+}
+
+function previewBriefing(){
+  const c=currentClient(); if(!c)return;
+  const questions=questionsForClient(c.id);
+  const grouped=groupBriefingQuestions(questions);
+  const fields=grouped.map(group=>`<div class="content-box"><h2>${escapeHtml(group.category)}</h2></div><div class="form">${group.questions.map((q,index)=>`<div class="full content-box"><label>${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}${renderBriefingPreviewInput(q)}</div>`).join('')}</div>`).join('');
+  const w=window.open('','_blank');
+  if(!w){alert('O navegador bloqueou a prévia. Libere pop-ups para este site.');return;}
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prévia do briefing</title><link rel="stylesheet" href="${window.location.origin}/style.css"></head><body><main><div class="panel"><div class="top"><div><h1>Briefing estratégico</h1><p class="muted">Cliente: ${escapeHtml(c.name)}</p><p class="muted">Este formulário será usado como base para o posicionamento, conteúdo, campanhas e processo comercial.</p></div><span class="pill purple">Prévia administrativa</span></div>${fields||'<div class="empty">Nenhuma pergunta ativa.</div>'}<div class="actions"><button disabled>Enviar briefing</button></div></div></main></body></html>`);
+  w.document.close();
+}
+
+async function setBriefingStatus(status){
+  const c=currentClient(); if(!c)return;
+  await updateDoc(doc(db,'hubClients',c.id),{briefingStatus:status,briefingEditAllowed:status==='Liberado',updatedAt:serverTimestamp()});
+  c.briefingStatus=status;
+  c.briefingEditAllowed=status==='Liberado';
+  renderWorkspace();
+  alert(status==='Liberado'?'Briefing liberado para o cliente responder.':status==='Bloqueado'?'Briefing bloqueado para o cliente.':'Briefing mantido em edição administrativa.');
+}
+
+async function duplicateBriefingQuestion(id){
+  const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
+  const maxOrder=Math.max(0,...briefingQuestions.map(x=>Number(x.order)||0));
+  const ref=await addDoc(collection(db,'hubBriefingQuestions'),{text:q.text+' (cópia)',description:q.description||'',category:q.category||'Geral',type:q.type||'textarea',required:q.required!==false,active:q.active!==false,clientId:q.clientId||null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+  briefingQuestions.push({...q,id:ref.id,text:q.text+' (cópia)',order:maxOrder+1});
+  renderWorkspace();
 }
 
 async function addBriefingQuestion(fromModel=false){
@@ -385,27 +435,29 @@ async function addBriefingQuestion(fromModel=false){
   if(!fromModel&&!c)return;
   const text=prompt('Digite a pergunta:'); if(!text?.trim())return;
   const description=prompt('Orientação opcional para o cliente:')||'';
+  const category=prompt('Categoria da pergunta:','Geral')||'Geral';
   const type=(prompt('Tipo: text, textarea, number, date, url ou yesno','textarea')||'textarea').toLowerCase();
   const required=confirm('Essa pergunta será obrigatória?');
   const onlyClient=!!c&&confirm('Esta pergunta deve aparecer somente para o cliente selecionado?');
   const maxOrder=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
-  await addDoc(collection(db,'hubBriefingQuestions'),{text:text.trim(),description:description.trim(),type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,active:true,clientId:onlyClient&&c?c.id:null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+  const payload={text:text.trim(),description:description.trim(),category:category.trim()||'Geral',type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,active:true,clientId:onlyClient&&c?c.id:null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()}; const ref=await addDoc(collection(db,'hubBriefingQuestions'),payload); briefingQuestions.push({...payload,id:ref.id}); renderWorkspace();
 }
 async function editBriefingQuestion(id){
   const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
   const text=prompt('Edite a pergunta:',q.text); if(!text?.trim())return;
   const description=prompt('Edite a orientação:',q.description||'')||'';
+  const category=prompt('Edite a categoria:',q.category||'Geral')||'Geral';
   const type=(prompt('Tipo: text, textarea, number, date, url ou yesno',q.type||'textarea')||q.type||'textarea').toLowerCase();
   const required=confirm('Clique em OK para obrigatória ou Cancelar para opcional.');
-  await updateDoc(doc(db,'hubBriefingQuestions',id),{text:text.trim(),description:description.trim(),type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,updatedAt:serverTimestamp()});
+  const changes={text:text.trim(),description:description.trim(),category:category.trim()||'Geral',type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,updatedAt:serverTimestamp()}; await updateDoc(doc(db,'hubBriefingQuestions',id),changes); Object.assign(q,changes); renderWorkspace();
 }
 async function deleteBriefingQuestion(id){
   if(!confirm('Excluir esta pergunta? As respostas antigas continuarão preservadas no histórico.'))return;
-  await deleteDoc(doc(db,'hubBriefingQuestions',id));
+  await deleteDoc(doc(db,'hubBriefingQuestions',id)); briefingQuestions=briefingQuestions.filter(q=>q.id!==id); renderWorkspace();
 }
 async function toggleBriefingQuestion(id){
   const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
-  await updateDoc(doc(db,'hubBriefingQuestions',id),{active:q.active===false,updatedAt:serverTimestamp()});
+  const active=q.active===false; await updateDoc(doc(db,'hubBriefingQuestions',id),{active,updatedAt:serverTimestamp()}); q.active=active; renderWorkspace();
 }
 async function moveBriefingQuestion(id,direction){
   const ordered=[...briefingQuestions].sort((a,b)=>(a.order||0)-(b.order||0));
@@ -425,12 +477,79 @@ async function lockBriefingEdit(){
   alert('Edição do briefing bloqueada.');
 }
 async function createRecommendedBriefingQuestions(){
+  const c=currentClient();
+  if(!c){alert('Selecione um cliente antes de importar perguntas.');return;}
   const recommended=[
-    ['Nome da empresa','text'],['Nome do responsável','text'],['Qual é o principal objetivo da empresa nas redes sociais?','textarea'],['Qual resultado vocês esperam alcançar nos próximos meses?','textarea'],['Quais serviços ou produtos devem receber mais destaque?','textarea'],['Qual serviço ou produto gera mais resultado para a empresa?','textarea'],['Quem é o público ideal da empresa?','textarea'],['Quais dores, dúvidas e desejos esse público possui?','textarea'],['O que normalmente impede esse público de comprar?','textarea'],['Como a empresa deseja ser percebida?','textarea'],['Quais são os principais diferenciais da empresa?','textarea'],['Por que um cliente deveria escolher a empresa?','textarea'],['Quem são os principais concorrentes ou referências?','textarea'],['Como funciona o processo de atendimento e venda?','textarea'],['Quais são as principais objeções recebidas?','textarea'],['Quem pode aparecer nos conteúdos e vídeos?','textarea'],['Quais dúvidas os clientes mais fazem?','textarea'],['O que já funcionou ou não funcionou no marketing?','textarea'],['Existem datas, campanhas, eventos ou lançamentos importantes?','textarea'],['Existe alguma informação adicional que a equipe precisa saber?','textarea']
+    ['Empresa','Qual é o nome completo da empresa e como ela deve ser apresentada ao público?','text','Informe nome oficial, nome fantasia e forma preferida de apresentação.'],
+    ['Empresa','Conte resumidamente como a empresa surgiu.','textarea','Inclua a motivação, os marcos importantes e o momento atual.'],
+    ['Empresa','Em quais cidades ou regiões a empresa atende?','textarea','Informe atendimento presencial, online e possíveis limitações geográficas.'],
+    ['Empresa','Quem são as pessoas responsáveis pela empresa e quais funções exercem?','textarea','Isso ajuda a definir quem poderá aparecer nos conteúdos e quem participa das aprovações.'],
+    ['Posicionamento','Como você gostaria que a empresa fosse reconhecida pelo mercado?','textarea','Descreva a percepção que deseja construir.'],
+    ['Posicionamento','Quais são os principais diferenciais da empresa?','textarea','Explique por que alguém deveria escolher sua empresa e não outra.'],
+    ['Posicionamento','Quais palavras definem a personalidade da marca?','textarea','Exemplo: próxima, elegante, técnica, acessível, moderna, acolhedora.'],
+    ['Posicionamento','Como a empresa não deseja ser percebida?','textarea','Informe estilos, abordagens ou posicionamentos que devem ser evitados.'],
+    ['Produtos e serviços','Quais produtos ou serviços a empresa oferece atualmente?','textarea','Liste os principais e explique brevemente cada um.'],
+    ['Produtos e serviços','Qual produto ou serviço deve receber maior destaque nos próximos meses?','textarea','Informe também o motivo dessa prioridade.'],
+    ['Produtos e serviços','Qual produto ou serviço gera maior lucro ou possui maior valor estratégico?','textarea','Essa informação ficará restrita ao planejamento interno.'],
+    ['Produtos e serviços','Existe algum produto ou serviço que não deve ser divulgado?','textarea','Explique restrições comerciais, técnicas ou de disponibilidade.'],
+    ['Público','Quem é o cliente ideal da empresa?','textarea','Descreva idade, cidade, profissão, rotina, renda aproximada e comportamento.'],
+    ['Público','Quais problemas ou necessidades levam esse cliente a procurar a empresa?','textarea','Liste dores práticas e emocionais.'],
+    ['Público','Quais desejos ou resultados esse cliente espera alcançar?','textarea','Descreva o que ele realmente quer conquistar.'],
+    ['Público','Quem normalmente toma a decisão de compra?','textarea','Pode ser o próprio cliente, cônjuge, família, gestor ou outra pessoa.'],
+    ['Vendas','Como um novo cliente costuma chegar até a empresa?','textarea','Exemplo: indicação, Instagram, Google, WhatsApp, eventos ou prospecção.'],
+    ['Vendas','Como funciona o atendimento desde o primeiro contato até a venda?','textarea','Explique as etapas, responsáveis e tempo médio de resposta.'],
+    ['Vendas','Quais são as principais dúvidas antes da compra?','textarea','Liste perguntas recorrentes recebidas pela equipe.'],
+    ['Vendas','Quais são as principais objeções que impedem a compra?','textarea','Exemplo: preço, prazo, medo, distância, confiança ou comparação.'],
+    ['Vendas','O que normalmente faz o cliente decidir comprar?','textarea','Explique os fatores que aumentam a confiança e aceleram a decisão.'],
+    ['Vendas','Existe acompanhamento após a venda? Como funciona?','textarea','Descreva pós-venda, retorno, suporte e fidelização.'],
+    ['Concorrência','Quem são os principais concorrentes?','textarea','Informe nomes, cidades, sites ou perfis.'],
+    ['Concorrência','O que esses concorrentes fazem bem?','textarea','Considere comunicação, atendimento, produto e presença digital.'],
+    ['Concorrência','Em quais pontos sua empresa é diferente ou superior?','textarea','Seja específico e evite respostas genéricas.'],
+    ['Referências','Quais empresas ou perfis você considera boas referências?','textarea','Podem ser do mesmo segmento ou de outros mercados.'],
+    ['Referências','Existe algum estilo de conteúdo, imagem ou comunicação que você não gosta?','textarea','Compartilhe exemplos quando possível.'],
+    ['Marketing','Quais são os principais objetivos de marketing para os próximos 3 a 6 meses?','textarea','Exemplo: gerar leads, vender mais, fortalecer marca ou lançar um serviço.'],
+    ['Marketing','Quais canais de divulgação a empresa utiliza hoje?','textarea','Instagram, Facebook, Google, site, e-mail, WhatsApp, eventos e outros.'],
+    ['Marketing','A empresa já investe em anúncios?','textarea','Informe plataformas, investimento médio e resultados percebidos.'],
+    ['Marketing','Quais ações de marketing já deram bons resultados?','textarea','Explique o que foi feito e qual resultado trouxe.'],
+    ['Marketing','Quais ações não deram resultado ou não devem ser repetidas?','textarea','Isso ajuda a evitar erros e compreender experiências anteriores.'],
+    ['Conteúdo','Quais assuntos a empresa precisa falar com frequência?','textarea','Liste temas educativos, comerciais, institucionais e de autoridade.'],
+    ['Conteúdo','Quais perguntas dos clientes poderiam virar conteúdo?','textarea','Liste dúvidas reais recebidas no atendimento.'],
+    ['Conteúdo','Quem poderá aparecer nos vídeos e fotos?','textarea','Informe disponibilidade, limitações e nível de conforto diante da câmera.'],
+    ['Conteúdo','Existem assuntos, pessoas ou imagens que não podem aparecer?','textarea','Inclua questões legais, éticas, de privacidade ou preferência.'],
+    ['Conteúdo','Qual tom de comunicação combina mais com a empresa?','textarea','Exemplo: profissional, leve, direto, educativo, sofisticado ou emocional.'],
+    ['Conteúdo','Quais datas, campanhas, eventos ou lançamentos são importantes?','textarea','Informe datas previstas para os próximos meses.'],
+    ['Autoridade','A empresa possui depoimentos, avaliações ou casos de sucesso?','yesno','Depois será possível incluir os links e materiais no planejamento.'],
+    ['Autoridade','Quais provas de autoridade podem ser usadas na comunicação?','textarea','Prêmios, certificados, tempo de mercado, números, resultados, estrutura ou equipe.'],
+    ['Autoridade','Existe algum caso real que represente bem o trabalho da empresa?','textarea','Conte o contexto, o problema e a transformação alcançada.'],
+    ['Identidade visual','A empresa possui logotipo, cores, fontes e manual de marca?','yesno','Informe depois onde os arquivos estão armazenados.'],
+    ['Identidade visual','Onde estão os arquivos, fotos e vídeos disponíveis?','url','Cole o link do Google Drive, Dropbox ou outra pasta.'],
+    ['Identidade visual','Existe alguma orientação obrigatória para o uso da marca?','textarea','Informe regras de cor, logotipo, assinatura, créditos ou proibições.'],
+    ['Metas','Qual é a principal meta comercial para os próximos meses?','textarea','Pode ser uma meta de vendas, faturamento, clientes, agenda ou expansão.'],
+    ['Metas','Quais produtos, serviços ou unidades precisam atingir essa meta?','textarea','Isso ajuda a direcionar campanhas e conteúdo.'],
+    ['Metas','Como a empresa saberá que o trabalho de marketing está dando resultado?','textarea','Defina os indicadores mais importantes para a empresa.'],
+    ['Aprovação','Quem será responsável por revisar e aprovar os conteúdos?','textarea','Informe nome, função e melhor canal de contato.'],
+    ['Aprovação','Em quanto tempo a empresa consegue aprovar um conteúdo?','text','Informe o prazo realista para não atrasar o calendário.'],
+    ['Aprovação','Existe outra pessoa que precisa participar das decisões?','textarea','Informe quem deve ser consultado e em quais situações.'],
+    ['Estratégia','O que você gostaria que todo cliente entendesse antes de entrar em contato?','textarea','Essa resposta costuma revelar excelentes temas de conteúdo.'],
+    ['Estratégia','Qual crença errada sobre seu mercado precisa ser corrigida?','textarea','Liste mitos, comparações e expectativas irreais.'],
+    ['Estratégia','O que faz um cliente desistir ou escolher um concorrente?','textarea','Considere preço, atendimento, prazo, confiança e experiência.'],
+    ['Estratégia','Se pudesse comunicar apenas uma mensagem ao mercado, qual seria?','textarea','Pense na ideia central que representa a empresa.'],
+    ['Estratégia','Existe alguma oportunidade, mudança ou risco importante para os próximos meses?','textarea','Considere mercado, equipe, concorrência, sazonalidade e estrutura.'],
+    ['Informações finais','Existe alguma informação importante que não foi perguntada?','textarea','Use este espaço para complementar o briefing.']
   ];
-  if(!confirm('Criar as perguntas estratégicas recomendadas para todos os clientes?'))return;
-  for(let i=0;i<recommended.length;i++)await addDoc(collection(db,'hubBriefingQuestions'),{text:recommended[i][0],description:'',type:recommended[i][1],required:true,active:true,clientId:null,order:i+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-  alert('Perguntas recomendadas criadas.');
+  if(!confirm('Importar o briefing estratégico completo para este cliente? As perguntas existentes serão preservadas.'))return;
+  const existing=new Set(briefingQuestions.filter(q=>q.clientId===c.id).map(q=>String(q.text).trim().toLowerCase()));
+  let order=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
+  const created=[];
+  for(const [category,text,type,description] of recommended){
+    if(existing.has(text.toLowerCase()))continue;
+    const payload={category,text,description,type,required:true,active:true,clientId:c.id,order:++order,createdAt:serverTimestamp(),updatedAt:serverTimestamp()};
+    const ref=await addDoc(collection(db,'hubBriefingQuestions'),payload);
+    created.push({...payload,id:ref.id});
+  }
+  briefingQuestions.push(...created);
+  renderWorkspace();
+  alert(created.length?created.length+' perguntas estratégicas importadas e exibidas abaixo.':'Todas as perguntas deste modelo já estavam cadastradas.');
 }
 
 function copyBriefingLink(){
