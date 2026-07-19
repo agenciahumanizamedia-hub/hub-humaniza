@@ -52,7 +52,7 @@ function startRealtime(){
 }
 
 
-Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode});
+Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode});
 
 function setPrintMode(mode){
   document.body.setAttribute('data-print-mode', mode);
@@ -180,13 +180,132 @@ function selectClient(id){selectedClientId=id;selectedProjectId=projects.filter(
 function selectProject(id){selectedProjectId=id;localStorage.setItem('hubSelectedProject',id);render()}
 function renderDashboard(){dashboard.innerHTML=`<div class="dashboard-card"><span class="muted">Clientes</span><strong>${clients.length}</strong></div><div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div><div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.strategicStatus!=='Aprovado').length}</strong></div><div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x)===100).length}</strong></div>`}
 function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clients.filter(c=>c.name.toLowerCase().includes(q));clientsList.innerHTML=list.length?list.map(c=>{let count=projects.filter(p=>p.clientId===c.id).length,first=projects.find(p=>p.clientId===c.id);return`<div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')"><h3>${c.name}</h3><div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>${count} projeto(s)</div><div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${first?statusPill(first.strategicStatus):''}</div></div>`}).join(''):'<div class="empty">Nenhum cliente.</div>'}
-function renderWorkspace(){let c=currentClient();if(!c){workspace.innerHTML='<div class="empty">Cadastre ou selecione um cliente.</div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p></div><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div><div class="actions"><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button>
+
+function normalizeFilterText(value){
+  const div=document.createElement('div');
+  div.innerHTML=value||'';
+  return (div.innerText||div.textContent||'')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'');
+}
+
+function renderContentFilters(scope){
+  return `<div class="admin-control-panel no-print">
+    <div class="control-head">
+      <h3>Localizar conteúdos</h3>
+      <p>Use a busca, a semana e o status para encontrar um conteúdo com mais facilidade.</p>
+    </div>
+    <div class="control-grid">
+      <label class="control-field">
+        <span>Buscar palavra</span>
+        <input id="${scope}_content_search" placeholder="Tema, objetivo, gancho, CTA..." oninput="applyAdminContentFilters('${scope}')">
+      </label>
+      <label class="control-field">
+        <span>Semana</span>
+        <select id="${scope}_content_week" onchange="applyAdminContentFilters('${scope}')">
+          <option value="">Todas</option>
+          <option>Semana 1</option>
+          <option>Semana 2</option>
+          <option>Semana 3</option>
+          <option>Semana 4</option>
+          <option>Semana 5</option>
+        </select>
+      </label>
+      <label class="control-field">
+        <span>Status</span>
+        <select id="${scope}_content_status" onchange="applyAdminContentFilters('${scope}')">
+          <option value="">Todos</option>
+          <option>Em criação</option>
+          <option>Aguardando aprovação</option>
+          <option>Aprovado</option>
+          <option>Ajustes</option>
+          <option>Postado</option>
+        </select>
+      </label>
+      <label class="control-field">
+        <span>Resultados</span>
+        <div class="pills"><span class="pill purple" id="${scope}_content_count">Todos</span></div>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="btn-dark" type="button" onclick="clearAdminContentFilters('${scope}')">Limpar filtros</button>
+    </div>
+  </div>`;
+}
+
+function applyAdminContentFilters(scope='admin'){
+  const search=normalizeFilterText(document.getElementById(scope+'_content_search')?.value||'');
+  const week=document.getElementById(scope+'_content_week')?.value||'';
+  const status=document.getElementById(scope+'_content_status')?.value||'';
+  const items=[...document.querySelectorAll(`.content-item[data-filter-scope="${scope}"]`)];
+  let visible=0;
+
+  items.forEach(item=>{
+    const text=normalizeFilterText(item.dataset.search||item.innerText);
+    const matchesSearch=!search||text.includes(search);
+    const matchesWeek=!week||item.dataset.week===week;
+    const matchesStatus=!status||item.dataset.status===status;
+    const show=matchesSearch&&matchesWeek&&matchesStatus;
+    item.classList.toggle('hidden',!show);
+    if(show)visible++;
+  });
+
+  const count=document.getElementById(scope+'_content_count');
+  if(count)count.textContent=items.length?`${visible} de ${items.length}`:'Nenhum';
+  const empty=document.getElementById(scope+'_content_empty');
+  if(empty)empty.classList.toggle('hidden',visible!==0||items.length===0);
+}
+
+function clearAdminContentFilters(scope='admin'){
+  const ids=[scope+'_content_search',scope+'_content_week',scope+'_content_status'];
+  ids.forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.value='';
+  });
+  applyAdminContentFilters(scope);
+}
+
+function renderBriefingAdmin(c){
+  const briefing=c.briefing||{};
+  const answered=c.briefingStatus==='Respondido';
+  return `<div class="stage">
+    <div class="stage-head">
+      <div>
+        <h2>Briefing do cliente</h2>
+        <p>${answered?'As respostas estão vinculadas a este cadastro.':'Envie o link exclusivo para o cliente responder.'}</p>
+      </div>
+      <span class="pill ${answered?'green':'yellow'}">${answered?'Respondido':'Pendente'}</span>
+    </div>
+    ${answered?`<div class="content-grid">
+      <div class="content-box"><label>Principal objetivo</label><div class="readonly-box">${briefing.mainGoal||'Não informado'}</div></div>
+      <div class="content-box"><label>Serviços ou produtos em destaque</label><div class="readonly-box">${briefing.services||'Não informado'}</div></div>
+      <div class="content-box"><label>Público que deseja alcançar</label><div class="readonly-box">${briefing.audience||'Não informado'}</div></div>
+      <div class="content-box"><label>Como a marca deve ser percebida</label><div class="readonly-box">${briefing.brandPosition||'Não informado'}</div></div>
+      <div class="content-box"><label>Diferenciais</label><div class="readonly-box">${briefing.differentials||'Não informado'}</div></div>
+      <div class="content-box"><label>Referências ou concorrentes</label><div class="readonly-box">${briefing.references||'Não informado'}</div></div>
+    </div>`:''}
+    <div class="actions">
+      <button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
+    </div>
+  </div>`;
+}
+
+function copyBriefingLink(){
+  const c=currentClient();
+  if(!c)return;
+  const link=window.location.origin+'/cliente.html?id='+c.id+'&briefing=1';
+  navigator.clipboard?.writeText(link);
+  alert('Link do briefing copiado: '+link);
+}
+
+function renderWorkspace(){let c=currentClient();if(!c){workspace.innerHTML='<div class="empty">Cadastre ou selecione um cliente.</div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p></div><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div><div class="actions"><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button><button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
         <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
         <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
         <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button>
         <button class="btn-dark" onclick="printFullProject()">Salvar projeto em PDF</button>
         <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
-        <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button></div></div>${renderProjects(c)}${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`}
+        <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button></div></div>${renderBriefingAdmin(c)}${renderProjects(c)}${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`}
 function renderProjects(c){let list=projects.filter(p=>p.clientId===c.id);if(!list.length)return'';return`<div class="project-list">${list.map(x=>`<div class="project-card ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}</div>`}
 function stepClass(s){if(s==='Aprovado')return'done';if(s==='Bloqueado')return'locked';return'active'}
 function renderProjectDetail(c,p,isAdmin){return`<div class="stage"><div class="stage-head"><div><h2>Projeto ${p.period}</h2><p>Etapas liberadas conforme aprovação.</p></div><span class="pill">${progress(p)}%</span></div><div class="flow"><div class="step ${stepClass(p.strategicStatus)}"><b>01 Planejamento</b><br>${p.strategicStatus}</div><div class="step ${stepClass(p.productionStatus)}"><b>02 Desenvolvimento</b><br>${p.productionStatus}</div><div class="step ${stepClass(p.calendarStatus)}"><b>03 Calendário</b><br>${p.calendarStatus}</div><div class="step ${stepClass(p.approvalStatus)}"><b>04 Aprovações</b><br>${p.approvalStatus}</div></div></div>${isAdmin?adminControls(c,p):''}${stageStrategic(p,isAdmin)}${stageProduction(p,isAdmin)}${stageCalendar(p,isAdmin)}${stageApproval(p,isAdmin)}<div class="stage"><h2>Histórico</h2><div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div></div>`}
@@ -195,9 +314,9 @@ function field(label,id,value,isAdmin){
   return `<div class="content-box"><label>${label}</label><div class="readonly-box">${value||''}</div></div>`;
 }
 function stageStrategic(p,isAdmin){return`<div class="stage"><div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>A produção só libera após essa aprovação.</p></div>${statusPill(p.strategicStatus)}</div>${isAdmin?stageControl('strategic',p.strategicStatus):''}<div class="content-grid">${field('Visão Macro','strategic_macro',p.strategic?.macro,isAdmin)}${field('Linha Editorial','strategic_editorial',p.strategic?.editorial,isAdmin)}${field('Temas do mês','strategic_themes',p.strategic?.themes,isAdmin)}${field('Direção Criativa','strategic_creative',p.strategic?.creative,isAdmin)}</div><label>Observações do cliente</label><textarea class="note" id="strategic_note" oninput="autoGrow(this)">${p.strategic?.note||''}</textarea><div class="actions"><button class="btn-dark" onclick="saveDraft('planejamento estratégico')">Salvar alterações</button><button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button><button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button></div></div>`}
-function stageProduction(p,isAdmin){let items=p.production?.items||[];let blocked=!isAdmin&&p.productionStatus==='Bloqueado';return`<div class="stage ${blocked?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>${isAdmin?'Área liberada para a agência preparar antes da aprovação do cliente.':'Cards separados para roteiros, carrosséis e estáticos.'}</p></div>${statusPill(p.productionStatus)}</div>${isAdmin?stageControl('production',p.productionStatus):''}${blocked?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`<div class="content-actions"><button onclick="addContentItem('roteiro')">+ Adicionar roteiro</button><button onclick="addContentItem('carrossel')">+ Adicionar carrossel</button><button onclick="addContentItem('estatico')">+ Adicionar estático</button><button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento Criativo</button></div>${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)">${p.production?.note||''}</textarea><div class="actions"><button class="btn-dark" onclick="saveDraft('desenvolvimento criativo')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('production')">Liberar desenvolvimento ao cliente</button><button class="btn-dark" onclick="saveDraft('calendário editorial')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('calendar')">Liberar calendário ao cliente</button><button class="btn-yellow" onclick="requestAdjust('production')">Registrar ajustes</button></div>`}</div>`}
+function stageProduction(p,isAdmin){let items=p.production?.items||[];let blocked=!isAdmin&&p.productionStatus==='Bloqueado';return`<div class="stage ${blocked?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>${isAdmin?'Área liberada para a agência preparar antes da aprovação do cliente.':'Cards separados para roteiros, carrosséis e estáticos.'}</p></div>${statusPill(p.productionStatus)}</div>${isAdmin?stageControl('production',p.productionStatus):''}${blocked?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`${renderContentFilters('admin')}<div id="admin_content_empty" class="empty hidden">Nenhum conteúdo encontrado com esses filtros.</div><div class="content-actions"><button onclick="addContentItem('roteiro')">+ Adicionar roteiro</button><button onclick="addContentItem('carrossel')">+ Adicionar carrossel</button><button onclick="addContentItem('estatico')">+ Adicionar estático</button><button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento Criativo</button></div>${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)">${p.production?.note||''}</textarea><div class="actions"><button class="btn-dark" onclick="saveDraft('desenvolvimento criativo')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('production')">Liberar desenvolvimento ao cliente</button><button class="btn-dark" onclick="saveDraft('calendário editorial')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('calendar')">Liberar calendário ao cliente</button><button class="btn-yellow" onclick="requestAdjust('production')">Registrar ajustes</button></div>`}</div>`}
 function itemProgress(item){let total=item.checklist?.length||0,done=(item.checklist||[]).filter(x=>x.done).length;return total?Math.round(done*100/total):0}
-function renderContentItem(item){let pct=itemProgress(item),typeLabel=item.type==='roteiro'?'🎬 Roteiro':item.type==='carrossel'?'📚 Carrossel':'🖼️ Estático';return`<div class="content-item ${pct===100?'done':''}" data-item="${item.id}"><div class="content-item-head"><div><h4>${typeLabel}</h4><span class="muted">${pct}% concluído</span></div><button class="btn-danger" onclick="removeContentItem('${item.id}')">Remover</button></div><div class="content-progress"><span style="width:${pct}%"></span></div><label>Responsável</label><textarea data-field="responsible" oninput="autoGrow(this)" placeholder="Ex: Diego, Luana, Lucas">${item.responsible||''}</textarea><label>Link Drive</label><textarea data-field="driveLink" oninput="autoGrow(this)" placeholder="Cole aqui o link do Drive">${item.driveLink||''}</textarea><label>Data de postagem</label><input type="date" data-field="postDate" value="${item.postDate||''}"><label>Semana do mês</label><select data-field="week"><option ${item.week==='Semana 1'?'selected':''}>Semana 1</option><option ${item.week==='Semana 2'?'selected':''}>Semana 2</option><option ${item.week==='Semana 3'?'selected':''}>Semana 3</option><option ${item.week==='Semana 4'?'selected':''}>Semana 4</option><option ${item.week==='Semana 5'?'selected':''}>Semana 5</option></select><label>Status do conteúdo</label><select data-field="itemStatus"><option ${item.itemStatus==='Em criação'?'selected':''}>Em criação</option><option ${item.itemStatus==='Aguardando aprovação'?'selected':''}>Aguardando aprovação</option><option ${item.itemStatus==='Aprovado'?'selected':''}>Aprovado</option><option ${item.itemStatus==='Ajustes'?'selected':''}>Ajustes</option><option ${item.itemStatus==='Postado'?'selected':''}>Postado</option></select><label>Tema</label><div class="rich-toolbar"><button type="button" onclick="formatText('bold')" title="Negrito">B</button><button type="button" onclick="formatText('foreColor','#5B56FF')" title="Letra roxa">Roxo</button><button type="button" onclick="formatText('foreColor','#1C1C1C')" title="Letra preta">Preto</button><button type="button" onclick="formatText('foreColor','#FFFFFF')" title="Letra branca">Branco</button><button type="button" onclick="formatHighlight()" title="Fundo preto com letra branca">Destaque</button><button type="button" onclick="clearFormat()" title="Remover formatação">Limpar</button></div><div class="rich-editor" onpaste="pasteClean(event)" data-field="tema" contenteditable="true">${item.fields?.tema||''}</div>${item.type==='roteiro'?`<label>Objetivo</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="objetivo" contenteditable="true">${item.fields?.objetivo||''}</div><label>Gancho</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="gancho" contenteditable="true">${item.fields?.gancho||''}</div><label>Desenvolvimento</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="desenvolvimento" contenteditable="true">${item.fields?.desenvolvimento||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}${item.type==='carrossel'?`<label>Objetivo</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="objetivo" contenteditable="true">${item.fields?.objetivo||''}</div><label>Slides</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="slides" contenteditable="true">${item.fields?.slides||''}</div><label>Legenda</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="legenda" contenteditable="true">${item.fields?.legenda||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}${item.type==='estatico'?`<label>Mensagem principal</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="mensagem" contenteditable="true">${item.fields?.mensagem||''}</div><label>Legenda</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="legenda" contenteditable="true">${item.fields?.legenda||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}<div class="checklist">${(item.checklist||[]).map((c,i)=>`<label class="checkline"><input type="checkbox" ${c.done?'checked':''} onchange="toggleChecklist('${item.id}',${i},this.checked)"> ${c.label}</label>`).join('')}</div><label>Observações</label><textarea data-field="note" oninput="autoGrow(this)">${item.note||''}</textarea></div>`}
+function renderContentItem(item){let pct=itemProgress(item),typeLabel=item.type==='roteiro'?'🎬 Roteiro':item.type==='carrossel'?'📚 Carrossel':'🖼️ Estático';return`<div class="content-item ${pct===100?'done':''}" data-item="${item.id}" data-filter-scope="admin" data-week="${item.week||''}" data-status="${item.itemStatus||''}" data-search="${htmlToText(Object.values(item.fields||{}).join(' ')+' '+(item.note||'')+' '+(item.responsible||'')).replace(/"/g,'&quot;')}"><div class="content-item-head"><div><h4>${typeLabel}</h4><span class="muted">${pct}% concluído</span></div><button class="btn-danger" onclick="removeContentItem('${item.id}')">Remover</button></div><div class="content-progress"><span style="width:${pct}%"></span></div><label>Responsável</label><textarea data-field="responsible" oninput="autoGrow(this)" placeholder="Ex: Diego, Luana, Lucas">${item.responsible||''}</textarea><label>Link Drive</label><textarea data-field="driveLink" oninput="autoGrow(this)" placeholder="Cole aqui o link do Drive">${item.driveLink||''}</textarea><label>Data de postagem</label><input type="date" data-field="postDate" value="${item.postDate||''}"><label>Semana do mês</label><select data-field="week"><option ${item.week==='Semana 1'?'selected':''}>Semana 1</option><option ${item.week==='Semana 2'?'selected':''}>Semana 2</option><option ${item.week==='Semana 3'?'selected':''}>Semana 3</option><option ${item.week==='Semana 4'?'selected':''}>Semana 4</option><option ${item.week==='Semana 5'?'selected':''}>Semana 5</option></select><label>Status do conteúdo</label><select data-field="itemStatus"><option ${item.itemStatus==='Em criação'?'selected':''}>Em criação</option><option ${item.itemStatus==='Aguardando aprovação'?'selected':''}>Aguardando aprovação</option><option ${item.itemStatus==='Aprovado'?'selected':''}>Aprovado</option><option ${item.itemStatus==='Ajustes'?'selected':''}>Ajustes</option><option ${item.itemStatus==='Postado'?'selected':''}>Postado</option></select><label>Tema</label><div class="rich-toolbar"><button type="button" onclick="formatText('bold')" title="Negrito">B</button><button type="button" onclick="formatText('foreColor','#5B56FF')" title="Letra roxa">Roxo</button><button type="button" onclick="formatText('foreColor','#1C1C1C')" title="Letra preta">Preto</button><button type="button" onclick="formatText('foreColor','#FFFFFF')" title="Letra branca">Branco</button><button type="button" onclick="formatHighlight()" title="Fundo preto com letra branca">Destaque</button><button type="button" onclick="clearFormat()" title="Remover formatação">Limpar</button></div><div class="rich-editor" onpaste="pasteClean(event)" data-field="tema" contenteditable="true">${item.fields?.tema||''}</div>${item.type==='roteiro'?`<label>Objetivo</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="objetivo" contenteditable="true">${item.fields?.objetivo||''}</div><label>Gancho</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="gancho" contenteditable="true">${item.fields?.gancho||''}</div><label>Desenvolvimento</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="desenvolvimento" contenteditable="true">${item.fields?.desenvolvimento||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}${item.type==='carrossel'?`<label>Objetivo</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="objetivo" contenteditable="true">${item.fields?.objetivo||''}</div><label>Slides</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="slides" contenteditable="true">${item.fields?.slides||''}</div><label>Legenda</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="legenda" contenteditable="true">${item.fields?.legenda||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}${item.type==='estatico'?`<label>Mensagem principal</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="mensagem" contenteditable="true">${item.fields?.mensagem||''}</div><label>Legenda</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="legenda" contenteditable="true">${item.fields?.legenda||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}<div class="checklist">${(item.checklist||[]).map((c,i)=>`<label class="checkline"><input type="checkbox" ${c.done?'checked':''} onchange="toggleChecklist('${item.id}',${i},this.checked)"> ${c.label}</label>`).join('')}</div><label>Observações</label><textarea data-field="note" oninput="autoGrow(this)">${item.note||''}</textarea></div>`}
 
 function formatDateBR(v){if(!v)return 'Sem data';const [y,m,d]=v.split('-');return `${d}/${m}/${y}`;}
 function itemFormatLabel(type){return type==='roteiro'?'🎬 Roteiro':type==='carrossel'?'📚 Carrossel':'🖼️ Estático';}
