@@ -327,6 +327,15 @@ function renderAnswerValue(value){
   if(value===undefined||value===null||value==='')return 'Não informado';
   return escapeHtml(value).replace(/\n/g,'<br>');
 }
+function renderBriefingPreviewInput(q){
+  const disabled='disabled aria-disabled="true"';
+  if(q.type==='text')return `<input ${disabled} placeholder="Resposta curta do cliente">`;
+  if(q.type==='number')return `<input type="number" ${disabled} placeholder="0">`;
+  if(q.type==='date')return `<input type="date" ${disabled}>`;
+  if(q.type==='url')return `<input type="url" ${disabled} placeholder="https://">`;
+  if(q.type==='yesno')return `<select ${disabled}><option>Selecione</option><option>Sim</option><option>Não</option></select>`;
+  return `<textarea ${disabled} placeholder="Resposta do cliente"></textarea>`;
+}
 function renderBriefingAdmin(c){
   const questions=briefingQuestions.filter(q=>!q.clientId||q.clientId===c.id).sort((a,b)=>(a.order||0)-(b.order||0));
   const latest=latestBriefingAnswer(c.id);
@@ -336,7 +345,7 @@ function renderBriefingAdmin(c){
   const statusClass=editAllowed?'purple':answered?'green':'yellow';
   return `<div class="stage">
     <div class="stage-head">
-      <div><h2>Briefing do cliente</h2><p>O briefing pertence a ${escapeHtml(c.name)} e fica bloqueado após cada envio.</p></div>
+      <div><h2>Briefing do cliente</h2><p>Você pode visualizar e editar as perguntas antes de enviar. O cliente apenas responde e nunca pode alterar as perguntas.</p></div>
       <span class="pill ${statusClass}">${status}</span>
     </div>
     <div class="actions">
@@ -354,6 +363,18 @@ function renderBriefingAdmin(c){
         <div class="pills"><span class="pill">${questionTypeLabel(q.type)}</span><span class="pill ${q.required!==false?'green':'yellow'}">${q.required!==false?'Obrigatória':'Opcional'}</span><span class="pill ${q.active!==false?'purple':'lock'}">${q.active!==false?'Ativa':'Desativada'}</span><span class="pill">${q.clientId?'Somente este cliente':'Todos os clientes'}</span></div>
         <div class="actions"><button class="btn-dark" onclick="editBriefingQuestion('${q.id}')">Editar</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',-1)">Subir</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',1)">Descer</button><button class="btn-yellow" onclick="toggleBriefingQuestion('${q.id}')">${q.active!==false?'Desativar':'Ativar'}</button><button class="btn-danger" onclick="deleteBriefingQuestion('${q.id}')">Excluir</button></div>
       </div>`).join(''):'<div class="empty">Nenhuma pergunta cadastrada.</div>'}
+    </div>
+    <div class="admin-control-panel">
+      <div class="control-head">
+        <h3>Pré-visualização antes de enviar ao cliente</h3>
+        <p>Abaixo está exatamente a lista de perguntas ativas que o cliente verá. Os campos estão bloqueados nesta tela porque esta é apenas uma visualização.</p>
+      </div>
+      ${questionsForClient(c.id).length?`<div class="form">${questionsForClient(c.id).map((q,index)=>`<div class="full content-box">
+        <label>${index+1}. ${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>
+        ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
+        ${renderBriefingPreviewInput(q)}
+      </div>`).join('')}</div>
+      <div class="pills"><span class="pill green">Perguntas visíveis ao cliente</span><span class="pill lock">Cliente não edita perguntas</span></div>`:'<div class="empty">Nenhuma pergunta ativa será exibida ao cliente. Ative ou cadastre perguntas antes de copiar o link.</div>'}
     </div>
     ${latest?`<div class="content-grid">${questionsForClient(c.id).map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${renderAnswerValue(latest.answers?.[q.id])}</div></div>`).join('')}</div><p class="muted">Versão ${latest.version||1} • Enviado em ${escapeHtml(latest.answeredAt||'data não informada')}</p>`:''}
   </div>`;
