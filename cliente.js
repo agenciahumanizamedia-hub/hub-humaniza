@@ -11,7 +11,7 @@ function printDevelopment(){setPrintMode('development');}
 function printCalendar(){setPrintMode('calendar');}
 function printFullProject(){setPrintMode('full');}
 const params=new URLSearchParams(window.location.search);
-let selectedClientId=params.get('id'),client=null,projects=[],selectedProjectId=null;
+let selectedClientId=params.get('id'),briefingMode=params.get('briefing')==='1',client=null,projects=[],selectedProjectId=null;
 
 let realtimeReady=false;
 function showRealtimeNotice(){
@@ -66,7 +66,7 @@ function startClientRealtime(){
   });
 }
 
-Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects,printDevelopment,printCalendar,printFullProject,approveCreativeItem,requestCreativeAdjust});
+Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects,printDevelopment,printCalendar,printFullProject,approveCreativeItem,requestCreativeAdjust,applyClientContentFilters,clearClientContentFilters,saveBriefing});
 
 function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'}
 function goToProjects(){document.getElementById('projectNav')?.scrollIntoView({behavior:'smooth',block:'start'})}
@@ -137,12 +137,176 @@ async function requestCreativeAdjust(itemId){
   await saveCreativeItemDecision(itemId,'Ajustes');
 }
 
+
+function normalizeClientFilterText(value){
+  const div=document.createElement('div');
+  div.innerHTML=value||'';
+  return (div.innerText||div.textContent||'')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'');
+}
+
+function renderClientContentFilters(){
+  return `<div class="admin-control-panel no-print">
+    <div class="control-head">
+      <h3>Encontre um conteúdo</h3>
+      <p>Pesquise por palavra ou filtre pela semana e pelo status.</p>
+    </div>
+    <div class="control-grid">
+      <label class="control-field">
+        <span>Buscar palavra</span>
+        <input id="client_content_search" placeholder="Tema, objetivo, legenda..." oninput="applyClientContentFilters()">
+      </label>
+      <label class="control-field">
+        <span>Semana</span>
+        <select id="client_content_week" onchange="applyClientContentFilters()">
+          <option value="">Todas</option>
+          <option>Semana 1</option>
+          <option>Semana 2</option>
+          <option>Semana 3</option>
+          <option>Semana 4</option>
+          <option>Semana 5</option>
+        </select>
+      </label>
+      <label class="control-field">
+        <span>Status</span>
+        <select id="client_content_status" onchange="applyClientContentFilters()">
+          <option value="">Todos</option>
+          <option>Em criação</option>
+          <option>Aguardando aprovação</option>
+          <option>Aprovado</option>
+          <option>Ajustes</option>
+          <option>Postado</option>
+        </select>
+      </label>
+      <label class="control-field">
+        <span>Resultados</span>
+        <div class="pills"><span class="pill purple" id="client_content_count">Todos</span></div>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="btn-dark" type="button" onclick="clearClientContentFilters()">Limpar filtros</button>
+    </div>
+  </div>`;
+}
+
+function applyClientContentFilters(){
+  const search=normalizeClientFilterText(document.getElementById('client_content_search')?.value||'');
+  const week=document.getElementById('client_content_week')?.value||'';
+  const status=document.getElementById('client_content_status')?.value||'';
+  const items=[...document.querySelectorAll('.content-item[data-filter-scope="client"]')];
+  let visible=0;
+
+  items.forEach(item=>{
+    const text=normalizeClientFilterText(item.dataset.search||item.innerText);
+    const show=(!search||text.includes(search))&&(!week||item.dataset.week===week)&&(!status||item.dataset.status===status);
+    item.classList.toggle('hidden',!show);
+    if(show)visible++;
+  });
+
+  const count=document.getElementById('client_content_count');
+  if(count)count.textContent=items.length?`${visible} de ${items.length}`:'Nenhum';
+  const empty=document.getElementById('client_content_empty');
+  if(empty)empty.classList.toggle('hidden',visible!==0||items.length===0);
+}
+
+function clearClientContentFilters(){
+  ['client_content_search','client_content_week','client_content_status'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.value='';
+  });
+  applyClientContentFilters();
+}
+
+function renderBriefingForm(){
+  const b=client?.briefing||{};
+  return `<div class="client-hero">
+    <h1>Briefing Humaniza</h1>
+    <p class="muted">Olá, ${client?.name||''}. Preencha as informações abaixo para nos ajudar a construir sua estratégia.</p>
+    <div class="pills"><span class="pill purple">${client?.briefingStatus==='Respondido'?'Atualizar briefing':'Novo briefing'}</span></div>
+  </div>
+  <div class="stage">
+    <div class="form">
+      <div>
+        <label>Nome da empresa</label>
+        <input id="brief_company" value="${b.companyName||client?.name||''}">
+      </div>
+      <div>
+        <label>Nome do responsável</label>
+        <input id="brief_contact" value="${b.contactName||''}">
+      </div>
+      <div class="full">
+        <label>Qual é o principal objetivo da empresa nas redes sociais?</label>
+        <textarea id="brief_goal" oninput="autoGrow(this)" placeholder="Ex.: aumentar vendas, fortalecer a marca, gerar novos contatos...">${b.mainGoal||''}</textarea>
+      </div>
+      <div class="full">
+        <label>Quais serviços ou produtos devem receber destaque?</label>
+        <textarea id="brief_services" oninput="autoGrow(this)">${b.services||''}</textarea>
+      </div>
+      <div class="full">
+        <label>Quem é o público que deseja alcançar?</label>
+        <textarea id="brief_audience" oninput="autoGrow(this)">${b.audience||''}</textarea>
+      </div>
+      <div class="full">
+        <label>Como deseja que a marca seja percebida?</label>
+        <textarea id="brief_position" oninput="autoGrow(this)">${b.brandPosition||''}</textarea>
+      </div>
+      <div class="full">
+        <label>Quais são os principais diferenciais da empresa?</label>
+        <textarea id="brief_differentials" oninput="autoGrow(this)">${b.differentials||''}</textarea>
+      </div>
+      <div class="full">
+        <label>Possui referências ou concorrentes?</label>
+        <textarea id="brief_references" oninput="autoGrow(this)">${b.references||''}</textarea>
+      </div>
+      <div class="full">
+        <label>Informações adicionais</label>
+        <textarea id="brief_notes" oninput="autoGrow(this)">${b.notes||''}</textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn-green" onclick="saveBriefing()">Enviar briefing</button>
+    </div>
+  </div>`;
+}
+
+async function saveBriefing(){
+  const value=id=>document.getElementById(id)?.value?.trim()||'';
+  const briefing={
+    companyName:value('brief_company'),
+    contactName:value('brief_contact'),
+    mainGoal:value('brief_goal'),
+    services:value('brief_services'),
+    audience:value('brief_audience'),
+    brandPosition:value('brief_position'),
+    differentials:value('brief_differentials'),
+    references:value('brief_references'),
+    notes:value('brief_notes'),
+    answeredAt:new Date().toLocaleString('pt-BR')
+  };
+
+  if(!briefing.companyName||!briefing.mainGoal){
+    alert('Preencha pelo menos o nome da empresa e o principal objetivo.');
+    return;
+  }
+
+  await updateDoc(doc(db,'hubClients',selectedClientId),{
+    briefing,
+    briefingStatus:'Respondido',
+    briefingUpdatedAt:serverTimestamp(),
+    updatedAt:serverTimestamp()
+  });
+
+  alert('Briefing enviado com sucesso.');
+}
+
 function renderContentItem(item){
   let pct=itemProgress(item);
   const approval = item.clientApproval || 'Aguardando resposta';
   const approvalClass = approval === 'Aprovado' ? 'green' : approval === 'Ajustes solicitados' ? 'yellow' : 'purple';
 
-  return `<div class="content-item ${pct===100?'done':''}" data-item="${item.id}">
+  return `<div class="content-item ${pct===100?'done':''}" data-item="${item.id}" data-filter-scope="client" data-week="${item.week||''}" data-status="${item.itemStatus||''}" data-search="${normalizeClientFilterText(Object.values(item.fields||{}).join(' ')+' '+(item.note||'')).replace(/"/g,'&quot;')}">
     <div class="content-item-head">
       <div>
         <h4>${contentTypeName(item.type)}</h4>
@@ -187,7 +351,7 @@ function renderProjectDetail(c,p){return`<div id="projectDetail">
   <div class="stage"><h2>Histórico</h2><p class="muted">Registro das últimas ações.</p><div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div></div>
   </div>`}
 function stageStrategic(p){return`<div class="stage"><div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>Revise o planejamento antes de aprovar.</p></div>${statusPill(p.strategicStatus)}</div><div class="content-grid">${field('Visão Macro','strategic_macro',p.strategic?.macro)}${field('Linha Editorial','strategic_editorial',p.strategic?.editorial)}${field('Temas do mês','strategic_themes',p.strategic?.themes)}${field('Direção Criativa','strategic_creative',p.strategic?.creative)}</div><label>Observações do cliente</label><textarea class="note" id="strategic_note" oninput="autoGrow(this)" placeholder="Escreva aqui o que deseja ajustar no planejamento.">${p.strategic?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button><button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button></div></div>`}
-function stageProduction(p){let items=p.production?.items||[];return`<div class="stage ${!stageVisible(p.productionStatus)?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Imprimir desenvolvimento</button></div><p>Visualização dos roteiros, carrosséis e estáticos. O checklist é interno da Humaniza.</p></div>${statusPill(p.productionStatus)}</div>${!stageVisible(p.productionStatus)?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes gerais sobre os conteúdos.">${p.production?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button><button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button></div>`}</div>`}
+function stageProduction(p){let items=p.production?.items||[];return`<div class="stage ${!stageVisible(p.productionStatus)?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><div class="actions no-print"><button class="btn-dark" onclick="window.print()">Imprimir desenvolvimento</button></div><p>Visualização dos roteiros, carrosséis e estáticos. O checklist é interno da Humaniza.</p></div>${statusPill(p.productionStatus)}</div>${!stageVisible(p.productionStatus)?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`${renderClientContentFilters()}<div id="client_content_empty" class="empty hidden">Nenhum conteúdo encontrado com esses filtros.</div>${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)" placeholder="Escreva aqui ajustes gerais sobre os conteúdos.">${p.production?.note||''}</textarea><div class="actions"><button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button><button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button></div>`}</div>`}
 
 function itemFormatLabel(type){return type==='roteiro'?'🎬 Roteiro':type==='carrossel'?'📚 Carrossel':'🖼️ Estático';}
 function calendarItemsFromProduction(p){
@@ -230,7 +394,7 @@ async function approveProduction(){let p=currentProject();await save({production
 async function approveCalendar(){let p=currentProject();await save({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addH(p,'Cliente aprovou o Calendário.')});send(client,`✅ CALENDÁRIO APROVADO\n\nCliente: ${client.name}\nProjeto: ${p.period}`);await loadData()}
 async function requestAdjust(type){let p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento Criativo'],calendar:['calendarStatus','Calendário']};await save({[map[type][0]]:'Ajustes solicitados',history:addH(p,'Cliente solicitou ajustes em '+map[type][1]+'.')});send(client,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${client.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
 function projectLockedLabel(i){return i===0?'Próximo mês':'Em breve'}
-function renderClientPortal(){let box=document.getElementById('clientPortal');if(client.access==='Bloqueado'){box.innerHTML='<div class="empty">Acesso bloqueado temporariamente.</div>';return}let p=currentProject()||projects[0];if(p)selectedProjectId=p.id;box.innerHTML=`<div class="client-hero"><h1>Olá, ${client.name}</h1><p class="muted">Aqui você acompanha seus projetos, aprova etapas ou solicita ajustes.</p><div class="pills"><span class="pill">${client.status}</span><span class="pill">${client.access}</span></div>
+function renderClientPortal(){let box=document.getElementById('clientPortal');if(briefingMode){box.innerHTML=renderBriefingForm();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0);return}if(client.access==='Bloqueado'){box.innerHTML='<div class="empty">Acesso bloqueado temporariamente.</div>';return}let p=currentProject()||projects[0];if(p)selectedProjectId=p.id;box.innerHTML=`<div class="client-hero"><h1>Olá, ${client.name}</h1><p class="muted">Aqui você acompanha seus projetos, aprova etapas ou solicita ajustes.</p><div class="pills"><span class="pill">${client.status}</span><span class="pill">${client.access}</span></div>
       <div class="actions no-print">
         <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
         <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
