@@ -208,7 +208,9 @@ function applyClientContentFilters(){
 
   items.forEach(item=>{
     const text=normalizeClientFilterText(item.dataset.search||item.innerText);
-    const show=(!search||text.includes(search))&&(!week||item.dataset.week===week)&&(!status||item.dataset.status===status);
+    const currentWeek=item.querySelector('[data-field="week"]')?.value||item.dataset.week||'';
+    const currentStatus=item.querySelector('[data-field="itemStatus"]')?.value||item.dataset.status||'';
+    const show=(!search||text.includes(search))&&(!week||currentWeek===week)&&(!status||currentStatus===status);
     item.classList.toggle('hidden',!show);
     if(show)visible++;
   });
@@ -252,7 +254,7 @@ function renderBriefingForm(){
   const answers=latest?.answers||{};
   return `<div class="client-hero">
     <h1>Briefing Humaniza</h1>
-    <p class="muted">Olá, ${escapeHtml(client?.name||'')}. Este briefing pertence ao seu cadastro.</p>
+    <p class="muted">Olá, ${escapeHtml(client?.name||'')}. Antes de começarmos, queremos conhecer melhor a sua empresa. Responda com calma e da forma mais simples possível.</p>
     <div class="pills"><span class="pill ${canEdit?'purple':'green'}">${canEdit?(answered?'Edição liberada':'Novo briefing'):'Respondido e bloqueado'}</span></div>
   </div>
   <div class="stage">
