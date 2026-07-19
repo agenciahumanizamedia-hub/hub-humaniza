@@ -1,7 +1,7 @@
 function clientAccessBlocked(c){return c?.accessState==='Bloqueado'||c?.clientState==='Pausado';}
 function projectAccessBlocked(p){return p?.projectAccess==='Bloqueado'||p?.projectState==='Bloqueado'||p?.projectState==='Rascunho';}
 function stageVisible(status){return ['Liberado ao cliente','Aguardando aprovação','Aprovado','Finalizado','Em desenvolvimento','Em andamento'].includes(status);}
-import { db, getDoc, getDocs, doc, updateDoc, collection, query, where, serverTimestamp, onSnapshot } from "./firebase.js";
+import { db, getDoc, getDocs, doc, updateDoc, addDoc, collection, query, where, serverTimestamp, onSnapshot } from "./firebase.js";
 
 function setPrintMode(mode){
   document.body.setAttribute('data-print-mode', mode);
@@ -11,7 +11,7 @@ function printDevelopment(){setPrintMode('development');}
 function printCalendar(){setPrintMode('calendar');}
 function printFullProject(){setPrintMode('full');}
 const params=new URLSearchParams(window.location.search);
-let selectedClientId=params.get('id'),briefingMode=params.get('briefing')==='1',client=null,projects=[],selectedProjectId=null;
+let selectedClientId=params.get('id'),briefingMode=params.get('briefing')==='1',client=null,projects=[],briefingQuestions=[],briefingAnswers=[],selectedProjectId=null;
 
 let realtimeReady=false;
 function showRealtimeNotice(){
@@ -64,6 +64,14 @@ function startClientRealtime(){
     console.error('Erro tempo real projetos:',err);
     box.innerHTML='<div class="empty">Erro ao carregar projetos em tempo real.</div>';
   });
+  onSnapshot(collection(db,'hubBriefingQuestions'),snap=>{
+    briefingQuestions=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+    if(client)renderClientPortal();
+  },err=>console.error('Erro ao carregar perguntas do briefing:',err));
+  onSnapshot(query(collection(db,'hubBriefingAnswers'),where('clientId','==',selectedClientId)),snap=>{
+    briefingAnswers=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.version||0)-(a.version||0));
+    if(client)renderClientPortal();
+  },err=>console.error('Erro ao carregar respostas do briefing:',err));
 }
 
 Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects,printDevelopment,printCalendar,printFullProject,approveCreativeItem,requestCreativeAdjust,applyClientContentFilters,clearClientContentFilters,saveBriefing});
@@ -219,86 +227,77 @@ function clearClientContentFilters(){
   applyClientContentFilters();
 }
 
+function escapeHtml(value){
+  return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+function availableBriefingQuestions(){
+  return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===selectedClientId)).sort((a,b)=>(a.order||0)-(b.order||0));
+}
+function latestBriefing(){return briefingAnswers[0]||null;}
+function renderBriefingInput(q,value=''){
+  const required=q.required!==false?'data-required="1"':'';
+  const common=`id="brief_${q.id}" data-question-id="${q.id}" ${required}`;
+  if(q.type==='text')return `<input ${common} value="${escapeHtml(value)}">`;
+  if(q.type==='number')return `<input type="number" ${common} value="${escapeHtml(value)}">`;
+  if(q.type==='date')return `<input type="date" ${common} value="${escapeHtml(value)}">`;
+  if(q.type==='url')return `<input type="url" ${common} value="${escapeHtml(value)}" placeholder="https://">`;
+  if(q.type==='yesno')return `<select ${common}><option value="">Selecione</option><option value="Sim" ${value==='Sim'?'selected':''}>Sim</option><option value="Não" ${value==='Não'?'selected':''}>Não</option></select>`;
+  return `<textarea ${common} oninput="autoGrow(this)">${escapeHtml(value)}</textarea>`;
+}
 function renderBriefingForm(){
-  const b=client?.briefing||{};
+  const questions=availableBriefingQuestions();
+  const latest=latestBriefing();
+  const answered=client?.briefingStatus==='Respondido'||!!latest;
+  const canEdit=!answered||client?.briefingEditAllowed===true;
+  const answers=latest?.answers||{};
   return `<div class="client-hero">
     <h1>Briefing Humaniza</h1>
-    <p class="muted">Olá, ${client?.name||''}. Preencha as informações abaixo para nos ajudar a construir sua estratégia.</p>
-    <div class="pills"><span class="pill purple">${client?.briefingStatus==='Respondido'?'Atualizar briefing':'Novo briefing'}</span></div>
+    <p class="muted">Olá, ${escapeHtml(client?.name||'')}. Este briefing pertence ao seu cadastro.</p>
+    <div class="pills"><span class="pill ${canEdit?'purple':'green'}">${canEdit?(answered?'Edição liberada':'Novo briefing'):'Respondido e bloqueado'}</span></div>
   </div>
   <div class="stage">
-    <div class="form">
-      <div>
-        <label>Nome da empresa</label>
-        <input id="brief_company" value="${b.companyName||client?.name||''}">
-      </div>
-      <div>
-        <label>Nome do responsável</label>
-        <input id="brief_contact" value="${b.contactName||''}">
-      </div>
-      <div class="full">
-        <label>Qual é o principal objetivo da empresa nas redes sociais?</label>
-        <textarea id="brief_goal" oninput="autoGrow(this)" placeholder="Ex.: aumentar vendas, fortalecer a marca, gerar novos contatos...">${b.mainGoal||''}</textarea>
-      </div>
-      <div class="full">
-        <label>Quais serviços ou produtos devem receber destaque?</label>
-        <textarea id="brief_services" oninput="autoGrow(this)">${b.services||''}</textarea>
-      </div>
-      <div class="full">
-        <label>Quem é o público que deseja alcançar?</label>
-        <textarea id="brief_audience" oninput="autoGrow(this)">${b.audience||''}</textarea>
-      </div>
-      <div class="full">
-        <label>Como deseja que a marca seja percebida?</label>
-        <textarea id="brief_position" oninput="autoGrow(this)">${b.brandPosition||''}</textarea>
-      </div>
-      <div class="full">
-        <label>Quais são os principais diferenciais da empresa?</label>
-        <textarea id="brief_differentials" oninput="autoGrow(this)">${b.differentials||''}</textarea>
-      </div>
-      <div class="full">
-        <label>Possui referências ou concorrentes?</label>
-        <textarea id="brief_references" oninput="autoGrow(this)">${b.references||''}</textarea>
-      </div>
-      <div class="full">
-        <label>Informações adicionais</label>
-        <textarea id="brief_notes" oninput="autoGrow(this)">${b.notes||''}</textarea>
-      </div>
-    </div>
-    <div class="actions">
-      <button class="btn-green" onclick="saveBriefing()">Enviar briefing</button>
-    </div>
+    ${!questions.length?'<div class="empty">As perguntas do briefing ainda não foram cadastradas pela Humaniza.</div>':canEdit?`<div class="form">${questions.map(q=>`<div class="full"><label>${escapeHtml(q.text)} ${q.required!==false?'<strong>*</strong>':''}</label>${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}${renderBriefingInput(q,answers[q.id]||'')}</div>`).join('')}</div><div class="actions"><button class="btn-green" onclick="saveBriefing()">Enviar briefing</button></div><p class="muted">Após o envio, as respostas serão bloqueadas. Uma nova edição somente poderá ser liberada pela Humaniza.</p>`:`<div class="content-grid">${questions.map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${escapeHtml(answers[q.id]||'Não informado').replace(/\n/g,'<br>')}</div></div>`).join('')}</div><div class="pills"><span class="pill green">Briefing enviado</span><span class="pill lock">Edição bloqueada</span></div><p class="muted">Para alterar alguma resposta, solicite à Humaniza a liberação de uma nova edição.</p>`}
   </div>`;
 }
 
 async function saveBriefing(){
-  const value=id=>document.getElementById(id)?.value?.trim()||'';
-  const briefing={
-    companyName:value('brief_company'),
-    contactName:value('brief_contact'),
-    mainGoal:value('brief_goal'),
-    services:value('brief_services'),
-    audience:value('brief_audience'),
-    brandPosition:value('brief_position'),
-    differentials:value('brief_differentials'),
-    references:value('brief_references'),
-    notes:value('brief_notes'),
-    answeredAt:new Date().toLocaleString('pt-BR')
-  };
-
-  if(!briefing.companyName||!briefing.mainGoal){
-    alert('Preencha pelo menos o nome da empresa e o principal objetivo.');
+  if(client?.briefingStatus==='Respondido'&&client?.briefingEditAllowed!==true){
+    alert('Este briefing está bloqueado para edição. Solicite a liberação à Humaniza.');
     return;
   }
-
+  const questions=availableBriefingQuestions();
+  const answers={};
+  let firstMissing=null;
+  questions.forEach(q=>{
+    const el=document.getElementById('brief_'+q.id);
+    const value=(el?.value||'').trim();
+    answers[q.id]=value;
+    if(q.required!==false&&!value&&!firstMissing)firstMissing=el;
+  });
+  if(firstMissing){
+    alert('Responda todas as perguntas obrigatórias antes de enviar.');
+    firstMissing.focus();
+    return;
+  }
+  const previous=latestBriefing();
+  const version=(previous?.version||0)+1;
+  const answeredAt=new Date().toLocaleString('pt-BR');
+  await addDoc(collection(db,'hubBriefingAnswers'),{
+    clientId:selectedClientId,
+    clientName:client?.name||'',
+    version,
+    answers,
+    answeredAt,
+    createdAt:serverTimestamp()
+  });
   await updateDoc(doc(db,'hubClients',selectedClientId),{
-    briefing,
     briefingStatus:'Respondido',
+    briefingEditAllowed:false,
+    briefingCurrentVersion:version,
     briefingUpdatedAt:serverTimestamp(),
     updatedAt:serverTimestamp()
   });
-
-  alert('Briefing enviado com sucesso.');
+  alert('Briefing enviado com sucesso. A edição foi bloqueada.');
 }
 
 function renderContentItem(item){
