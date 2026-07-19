@@ -51,6 +51,7 @@ function startRealtime(){
   });
   onSnapshot(collection(db,'hubBriefingQuestions'),snap=>{
     briefingQuestions=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+    if(!briefingQuestions.length)ensureDefaultBriefingQuestions();
     render();
   },err=>console.error('Erro ao acompanhar perguntas do briefing:',err));
   onSnapshot(collection(db,'hubBriefingAnswers'),snap=>{
@@ -307,7 +308,6 @@ function renderBriefingAdmin(c){
       ${answered&&!editAllowed?'<button class="btn-green" onclick="releaseBriefingEdit()">Liberar nova edição</button>':''}
       ${editAllowed?'<button class="btn-yellow" onclick="lockBriefingEdit()">Bloquear edição</button>':''}
       <button onclick="addBriefingQuestion()">+ Adicionar pergunta</button>
-      ${!briefingQuestions.length?'<button class="btn-dark" onclick="createRecommendedBriefingQuestions()">Criar perguntas recomendadas</button>':''}
     </div>
     <div class="admin-control-panel">
       <div class="control-head"><h3>Gerenciar perguntas</h3><p>Somente o administrador pode criar, editar, excluir e reorganizar perguntas.</p></div>
@@ -365,13 +365,76 @@ async function lockBriefingEdit(){
   await updateDoc(doc(db,'hubClients',c.id),{briefingEditAllowed:false,briefingStatus:latestBriefingAnswer(c.id)?'Respondido':'Pendente',updatedAt:serverTimestamp()});
   alert('Edição do briefing bloqueada.');
 }
+const DEFAULT_BRIEFING_QUESTIONS=[
+  {text:'Nome da empresa',description:'Informe o nome utilizado comercialmente.',type:'text'},
+  {text:'Nome do responsável pelo preenchimento',description:'Informe o nome e a função da pessoa responsável por estas respostas.',type:'text'},
+  {text:'Cidade e região de atendimento',description:'Informe onde a empresa está localizada e quais regiões atende.',type:'text'},
+  {text:'Site e redes sociais da empresa',description:'Cole os links disponíveis.',type:'textarea'},
+  {text:'Há quanto tempo a empresa existe?',description:'Conte brevemente o momento atual da empresa.',type:'textarea'},
+  {text:'Qual é o principal objetivo da empresa nas redes sociais?',description:'Exemplo: gerar contatos, aumentar vendas, fortalecer a marca ou criar autoridade.',type:'textarea'},
+  {text:'Qual resultado vocês esperam alcançar nos próximos meses?',description:'Descreva o resultado considerado mais importante.',type:'textarea'},
+  {text:'Existe alguma meta específica?',description:'Pode ser uma meta de vendas, contatos, agenda, alcance ou posicionamento.',type:'textarea'},
+  {text:'Qual serviço ou produto precisa ser vendido com mais prioridade?',description:'Informe o que deve receber maior destaque na estratégia.',type:'textarea'},
+  {text:'Quais são os principais produtos ou serviços da empresa?',description:'Liste os principais e explique resumidamente cada um.',type:'textarea'},
+  {text:'Qual produto ou serviço gera mais resultado para a empresa?',description:'Considere procura, faturamento, margem ou importância estratégica.',type:'textarea'},
+  {text:'Qual produto ou serviço possui maior dificuldade de venda?',description:'Explique o que pode estar dificultando a venda.',type:'textarea'},
+  {text:'Existe algum lançamento, campanha ou novidade prevista?',description:'Informe datas ou períodos aproximados.',type:'textarea'},
+  {text:'Quem é o público ideal da empresa?',description:'Descreva idade, perfil, profissão, localização e outras características relevantes.',type:'textarea'},
+  {text:'Existe mais de um tipo de público?',description:'Explique os diferentes perfis atendidos pela empresa.',type:'textarea'},
+  {text:'Quais dores, dúvidas e desejos esse público possui?',description:'Pense nas situações que fazem o cliente procurar a empresa.',type:'textarea'},
+  {text:'O que normalmente impede esse público de comprar?',description:'Exemplo: preço, insegurança, falta de informação, tempo ou comparação com concorrentes.',type:'textarea'},
+  {text:'Como os clientes costumam encontrar a empresa?',description:'Exemplo: indicação, Instagram, Google, anúncios, loja física ou parceiros.',type:'textarea'},
+  {text:'Como a empresa deseja ser percebida?',description:'Exemplo: humana, sofisticada, acessível, técnica, moderna ou referência.',type:'textarea'},
+  {text:'Quais são os principais diferenciais da empresa?',description:'Explique o que torna a experiência, produto ou serviço diferente.',type:'textarea'},
+  {text:'Por que um cliente deveria escolher a empresa e não um concorrente?',description:'Apresente os motivos mais fortes para a escolha.',type:'textarea'},
+  {text:'Quais valores a marca deseja transmitir?',description:'Liste os valores que precisam aparecer na comunicação.',type:'textarea'},
+  {text:'Como deve ser o tom da comunicação?',description:'Exemplo: formal, leve, técnico, humano, sofisticado ou descontraído.',type:'textarea'},
+  {text:'Existe alguma palavra, promessa ou abordagem que não deve ser utilizada?',description:'Informe restrições de linguagem, posicionamento ou regras profissionais.',type:'textarea'},
+  {text:'Quem são os principais concorrentes?',description:'Informe nomes, perfis ou links.',type:'textarea'},
+  {text:'Quais marcas ou perfis vocês admiram como referência?',description:'Explique o que gostam nessas referências.',type:'textarea'},
+  {text:'Existe algum perfil que represente exatamente o que a empresa não quer ser?',description:'Explique o que deve ser evitado.',type:'textarea'},
+  {text:'Como funciona o processo de atendimento e venda?',description:'Descreva desde o primeiro contato até o fechamento.',type:'textarea'},
+  {text:'Quem recebe os contatos gerados pelas redes sociais?',description:'Informe o responsável e como o atendimento é feito.',type:'textarea'},
+  {text:'Qual é o tempo médio de resposta aos novos contatos?',description:'Informe o tempo aproximado.',type:'text'},
+  {text:'Quais são as principais objeções recebidas?',description:'Exemplo: preço, prazo, medo, localização ou comparação.',type:'textarea'},
+  {text:'Existe alguma limitação de agenda, estoque ou capacidade de atendimento?',description:'Informe tudo o que pode limitar campanhas ou vendas.',type:'textarea'},
+  {text:'Quais assuntos a empresa deseja abordar nos conteúdos?',description:'Liste temas prioritários.',type:'textarea'},
+  {text:'Existe algum assunto que não pode ser abordado?',description:'Informe temas proibidos ou que exigem cuidado.',type:'textarea'},
+  {text:'Quem pode aparecer nos vídeos e conteúdos?',description:'Informe nomes, cargos e disponibilidade.',type:'textarea'},
+  {text:'A empresa possui fotos, vídeos, depoimentos ou casos reais disponíveis?',description:'Explique quais materiais podem ser utilizados.',type:'textarea'},
+  {text:'Pode mostrar bastidores, clientes ou pacientes?',description:'Informe limites e autorizações necessárias.',type:'textarea'},
+  {text:'Quais dúvidas os clientes mais fazem?',description:'Liste as perguntas mais frequentes recebidas no atendimento.',type:'textarea'},
+  {text:'A empresa já trabalhou com marketing anteriormente?',description:'Conte como foi a experiência.',type:'textarea'},
+  {text:'O que já funcionou bem na comunicação ou nas campanhas?',description:'Compartilhe conteúdos, ações ou anúncios que deram resultado.',type:'textarea'},
+  {text:'O que não funcionou ou gerou insatisfação?',description:'Explique experiências que não devem ser repetidas.',type:'textarea'},
+  {text:'Qual conteúdo teve melhor resultado até hoje?',description:'Se possível, informe o link ou descreva o conteúdo.',type:'textarea'},
+  {text:'Existem datas, campanhas, eventos ou lançamentos importantes?',description:'Liste tudo o que deve entrar no planejamento.',type:'textarea'},
+  {text:'Existe alguma informação adicional que a equipe precisa saber?',description:'Inclua qualquer detalhe importante que não apareceu nas perguntas anteriores.',type:'textarea'}
+];
+
+let defaultBriefingSeedStarted=false;
+async function ensureDefaultBriefingQuestions(){
+  if(defaultBriefingSeedStarted||briefingQuestions.length)return;
+  defaultBriefingSeedStarted=true;
+  try{
+    for(let i=0;i<DEFAULT_BRIEFING_QUESTIONS.length;i++){
+      const q=DEFAULT_BRIEFING_QUESTIONS[i];
+      await addDoc(collection(db,'hubBriefingQuestions'),{...q,required:true,active:true,clientId:null,isDefault:true,order:i+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+    }
+  }catch(err){
+    defaultBriefingSeedStarted=false;
+    console.error('Erro ao criar perguntas padrão do briefing:',err);
+    alert('Não foi possível criar as perguntas padrão do briefing: '+(err.message||err));
+  }
+}
+
 async function createRecommendedBriefingQuestions(){
-  const recommended=[
-    ['Nome da empresa','text'],['Nome do responsável','text'],['Qual é o principal objetivo da empresa nas redes sociais?','textarea'],['Qual resultado vocês esperam alcançar nos próximos meses?','textarea'],['Quais serviços ou produtos devem receber mais destaque?','textarea'],['Qual serviço ou produto gera mais resultado para a empresa?','textarea'],['Quem é o público ideal da empresa?','textarea'],['Quais dores, dúvidas e desejos esse público possui?','textarea'],['O que normalmente impede esse público de comprar?','textarea'],['Como a empresa deseja ser percebida?','textarea'],['Quais são os principais diferenciais da empresa?','textarea'],['Por que um cliente deveria escolher a empresa?','textarea'],['Quem são os principais concorrentes ou referências?','textarea'],['Como funciona o processo de atendimento e venda?','textarea'],['Quais são as principais objeções recebidas?','textarea'],['Quem pode aparecer nos conteúdos e vídeos?','textarea'],['Quais dúvidas os clientes mais fazem?','textarea'],['O que já funcionou ou não funcionou no marketing?','textarea'],['Existem datas, campanhas, eventos ou lançamentos importantes?','textarea'],['Existe alguma informação adicional que a equipe precisa saber?','textarea']
-  ];
-  if(!confirm('Criar as perguntas estratégicas recomendadas para todos os clientes?'))return;
-  for(let i=0;i<recommended.length;i++)await addDoc(collection(db,'hubBriefingQuestions'),{text:recommended[i][0],description:'',type:recommended[i][1],required:true,active:true,clientId:null,order:i+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-  alert('Perguntas recomendadas criadas.');
+  if(briefingQuestions.length){
+    alert('As perguntas padrão já estão cadastradas. Use “+ Adicionar pergunta” para criar uma pergunta nova.');
+    return;
+  }
+  await ensureDefaultBriefingQuestions();
+  alert('Perguntas padrão criadas com sucesso.');
 }
 
 function copyBriefingLink(){
