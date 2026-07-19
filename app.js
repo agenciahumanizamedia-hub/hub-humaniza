@@ -293,8 +293,14 @@ function groupBriefingQuestions(questions){
   });
   return groups;
 }
+function isBriefingQuestionForClient(q,clientId){
+  const owner=String(q?.clientId||'').trim();
+  return !owner||owner===String(clientId||'').trim();
+}
 function questionsForClient(clientId){
-  return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===clientId)).sort((a,b)=>(a.order||0)-(b.order||0));
+  return briefingQuestions
+    .filter(q=>q.active!==false&&isBriefingQuestionForClient(q,clientId))
+    .sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
 }
 
 function showBriefingModel(){
@@ -349,7 +355,7 @@ function renderBriefingPreviewInput(q){
   return '<textarea disabled placeholder="Resposta do cliente"></textarea>';
 }
 function renderBriefingAdmin(c){
-  const questions=briefingQuestions.filter(q=>!q.clientId||q.clientId===c.id).sort((a,b)=>(a.order||0)-(b.order||0));
+  const questions=briefingQuestions.filter(q=>isBriefingQuestionForClient(q,c.id)).sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
   const activeQuestions=questions.filter(q=>q.active!==false);
   const groupedQuestions=groupBriefingQuestions(questions);
   const groupedActive=groupBriefingQuestions(activeQuestions);
@@ -537,19 +543,64 @@ async function createRecommendedBriefingQuestions(){
     ['Estratégia','Existe alguma oportunidade, mudança ou risco importante para os próximos meses?','textarea','Considere mercado, equipe, concorrência, sazonalidade e estrutura.'],
     ['Informações finais','Existe alguma informação importante que não foi perguntada?','textarea','Use este espaço para complementar o briefing.']
   ];
-  if(!confirm('Importar o briefing estratégico completo para este cliente? As perguntas existentes serão preservadas.'))return;
-  const existing=new Set(briefingQuestions.filter(q=>q.clientId===c.id).map(q=>String(q.text).trim().toLowerCase()));
-  let order=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
-  const created=[];
-  for(const [category,text,type,description] of recommended){
-    if(existing.has(text.toLowerCase()))continue;
-    const payload={category,text,description,type,required:true,active:true,clientId:c.id,order:++order,createdAt:serverTimestamp(),updatedAt:serverTimestamp()};
-    const ref=await addDoc(collection(db,'hubBriefingQuestions'),payload);
-    created.push({...payload,id:ref.id});
+
+  if(!confirm('Importar o briefing estratégico completo? As perguntas existentes serão preservadas e o modelo ficará disponível para todos os clientes.'))return;
+
+  const button=document.activeElement;
+  const originalText=button?.textContent||'';
+  if(button?.tagName==='BUTTON'){
+    button.disabled=true;
+    button.textContent='Importando perguntas...';
   }
-  briefingQuestions.push(...created);
-  renderWorkspace();
-  alert(created.length?created.length+' perguntas estratégicas importadas e exibidas abaixo.':'Todas as perguntas deste modelo já estavam cadastradas.');
+
+  try{
+    const normalize=value=>String(value||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const existing=new Set(
+      briefingQuestions
+        .filter(q=>isBriefingQuestionForClient(q,c.id))
+        .map(q=>normalize(q.text))
+    );
+    let order=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
+    const pending=recommended
+      .filter(([,text])=>!existing.has(normalize(text)))
+      .map(([category,text,type,description])=>({
+        category,
+        text,
+        description,
+        type,
+        required:true,
+        active:true,
+        clientId:null,
+        order:++order,
+        createdAt:serverTimestamp(),
+        updatedAt:serverTimestamp()
+      }));
+
+    if(!pending.length){
+      alert('Todas as perguntas deste modelo já estão cadastradas.');
+      renderWorkspace();
+      return;
+    }
+
+    const refs=await Promise.all(
+      pending.map(payload=>addDoc(collection(db,'hubBriefingQuestions'),payload))
+    );
+
+    const created=pending.map((payload,index)=>({...payload,id:refs[index].id}));
+    const knownIds=new Set(briefingQuestions.map(q=>q.id));
+    created.forEach(q=>{if(!knownIds.has(q.id))briefingQuestions.push(q);});
+    briefingQuestions.sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
+    renderWorkspace();
+    alert(created.length+' perguntas estratégicas importadas e exibidas abaixo.');
+  }catch(err){
+    console.error('Erro ao importar briefing:',err);
+    alert('Não foi possível importar as perguntas. Verifique as permissões da coleção hubBriefingQuestions no Firebase. Detalhes: '+(err.message||err));
+  }finally{
+    if(button?.tagName==='BUTTON'){
+      button.disabled=false;
+      button.textContent=originalText;
+    }
+  }
 }
 
 function copyBriefingLink(){
