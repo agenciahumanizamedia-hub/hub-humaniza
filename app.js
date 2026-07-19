@@ -1,431 +1,587 @@
-let data = JSON.parse(localStorage.getItem('humanizaHubData') || '{"clients":[]}');
-let selectedClientId = localStorage.getItem('hubSelectedClient') || null;
-let selectedProjectId = localStorage.getItem('hubSelectedProject') || null;
-let mode = localStorage.getItem('hubMode') || 'agency';
+import { db, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from "./firebase.js";
 
-function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
-function saveAll(){localStorage.setItem('humanizaHubData', JSON.stringify(data))}
-function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'; saveCurrentFields()}
-function closeModals(){document.querySelectorAll('.modal').forEach(m=>m.classList.remove('active'))}
-function setMode(m){saveCurrentFields();mode=m;localStorage.setItem('hubMode',m);render()}
+let clients=[], projects=[], briefingQuestions=[], briefingAnswers=[], selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null, adminView=localStorage.getItem('hubAdminView')||'client';
 
-function openClientModal(){
-  clientName.value='';
-  clientEmail.value='';
-  responsibleName.value='';
-  responsiblePhone.value='';
-  clientStatus.value='Ativo';
-  clientAccess.value='Liberado';
-  clientObs.value='';
-  clientModal.classList.add('active');
-}
-
-function openProjectModal(){
-  if(!data.clients.length){alert('Cadastre um cliente primeiro.'); return}
-  projectClient.innerHTML = data.clients.map(c=>`<option value="${c.id}" ${c.id===selectedClientId?'selected':''}>${c.name}</option>`).join('');
-  updateCopyOptions();
-  projectClient.onchange = updateCopyOptions;
-  projectPeriod.value='';
-  projectModal.classList.add('active');
-}
-
-function updateCopyOptions(){
-  const c = data.clients.find(x=>x.id===projectClient.value);
-  projectCopy.innerHTML = '<option value="">Começar em branco</option>' + (c?.projects||[]).map(p=>`<option value="${p.id}">Duplicar ${p.period}</option>`).join('');
-}
-
-function saveClient(){
-  const name=clientName.value.trim();
-  if(!name){alert('Coloque o nome do cliente.');return}
-  const c={
-    id:uid(),
-    name,
-    email:clientEmail.value.trim(),
-    responsibleName:responsibleName.value.trim(),
-    responsiblePhone:responsiblePhone.value.trim().replace(/\D/g,''),
-    status:clientStatus.value,
-    access:clientAccess.value,
-    obs:clientObs.value.trim(),
-    projects:[]
-  };
-  data.clients.push(c);
-  selectedClientId=c.id;
-  selectedProjectId=null;
-  localStorage.setItem('hubSelectedClient',selectedClientId);
-  saveAll();
-  closeModals();
-  render();
-}
-
-function baseProject(period){
-  return {
-    id:uid(),
-    period,
-    strategicStatus:'Aguardando aprovação',
-    productionStatus:'Bloqueado',
-    calendarStatus:'Bloqueado',
-    approvalStatus:'Bloqueado',
-    history:['Projeto criado.'],
-    strategic:{
-      macro:'Objetivo principal do mês.',
-      editorial:'Autoridade, conexão, prova e conversão.',
-      themes:'Tema 01\nTema 02\nTema 03\nTema 04',
-      creative:'Tom humano, claro e estratégico.',
-      note:''
-    },
-    production:{
-      reels:'Reels 01\nTema:\nObjetivo:\nGancho:\nDesenvolvimento:\nCTA:',
-      carousel:'Carrossel 01\nTema:\nObjetivo:\nCards:\nLegenda:\nCTA:',
-      staticPost:'Post Estático\nTema:\nMensagem principal:\nLegenda:',
-      capture:'Data:\nLocal:\nEquipe:\nChecklist:',
-      note:''
-    },
-    calendar:{
-      content:'Calendário Editorial\n\n01/07:\nFormato:\nTema:\nStatus:',
-      note:''
-    }
+let realtimeReady=false;
+function showRealtimeNotice(){
+  let n=document.getElementById('realtimeNotice');
+  if(!n){
+    n=document.createElement('div');
+    n.id='realtimeNotice';
+    n.className='realtime-notice';
+    document.body.appendChild(n);
   }
+  n.textContent='Atualizado agora';
+  n.classList.add('show');
+  clearTimeout(window.__rtNotice);
+  window.__rtNotice=setTimeout(()=>n.classList.remove('show'),1800);
 }
-
-function saveProject(){
-  const c=data.clients.find(x=>x.id===projectClient.value);
-  if(!c)return;
-  const period=projectPeriod.value.trim();
-  if(!period){alert('Coloque o período.');return}
-  let p;
-  const copyId=projectCopy.value;
-  if(copyId){
-    const old=c.projects.find(x=>x.id===copyId);
-    p=JSON.parse(JSON.stringify(old));
-    p.id=uid();
-    p.period=period;
-    p.history=['Projeto criado duplicando '+old.period+'.'];
-    p.strategicStatus='Aguardando aprovação';
-    p.productionStatus='Bloqueado';
-    p.calendarStatus='Bloqueado';
-    p.approvalStatus='Bloqueado';
-  } else {
-    p=baseProject(period);
-  }
-  c.projects.unshift(p);
-  selectedClientId=c.id;
-  selectedProjectId=p.id;
-  localStorage.setItem('hubSelectedClient',selectedClientId);
-  localStorage.setItem('hubSelectedProject',selectedProjectId);
-  saveAll();
-  closeModals();
-  render();
-}
-
-function currentClient(){return data.clients.find(c=>c.id===selectedClientId)}
-function currentProject(){return currentClient()?.projects.find(p=>p.id===selectedProjectId)}
-
-function selectClient(id){
-  saveCurrentFields();
-  selectedClientId=id;
-  const c=currentClient();
-  selectedProjectId=c?.projects[0]?.id||null;
-  localStorage.setItem('hubSelectedClient',selectedClientId);
+function applyRealtimeData(newClients,newProjects){
+  clients=newClients;
+  projects=newProjects;
+  if(selectedClientId&&!clients.find(c=>c.id===selectedClientId))selectedClientId=clients[0]?.id||null;
+  if(!selectedClientId&&clients[0])selectedClientId=clients[0].id;
+  let ps=projects.filter(p=>p.clientId===selectedClientId);
+  if(selectedProjectId&&!ps.find(p=>p.id===selectedProjectId))selectedProjectId=ps[0]?.id||null;
+  if(!selectedProjectId&&ps[0])selectedProjectId=ps[0].id;
+  localStorage.setItem('hubSelectedClient',selectedClientId||'');
   localStorage.setItem('hubSelectedProject',selectedProjectId||'');
   render();
+  if(realtimeReady)showRealtimeNotice();
+  realtimeReady=true;
+}
+function startRealtime(){
+  let latestClients=[],latestProjects=[];
+  let gotClients=false,gotProjects=false;
+  onSnapshot(collection(db,'hubClients'),snap=>{
+    latestClients=snap.docs.map(d=>({id:d.id,...d.data()}));
+    gotClients=true;
+    if(gotProjects)applyRealtimeData(latestClients,latestProjects);
+  },err=>{
+    console.error('Erro tempo real clientes:',err);
+    alert('Erro ao acompanhar clientes em tempo real: '+(err.message||err));
+  });
+  onSnapshot(collection(db,'hubProjects'),snap=>{
+    latestProjects=snap.docs.map(d=>({id:d.id,...d.data()}));
+    gotProjects=true;
+    if(gotClients)applyRealtimeData(latestClients,latestProjects);
+  },err=>{
+    console.error('Erro tempo real projetos:',err);
+    alert('Erro ao acompanhar projetos em tempo real: '+(err.message||err));
+  });
+  onSnapshot(collection(db,'hubBriefingQuestions'),snap=>{
+    briefingQuestions=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));
+    render();
+  },err=>console.error('Erro ao acompanhar perguntas do briefing:',err));
+  onSnapshot(collection(db,'hubBriefingAnswers'),snap=>{
+    briefingAnswers=snap.docs.map(d=>({id:d.id,...d.data()}));
+    render();
+  },err=>console.error('Erro ao acompanhar respostas do briefing:',err));
 }
 
-function selectProject(id){
-  saveCurrentFields();
-  selectedProjectId=id;
-  localStorage.setItem('hubSelectedProject',id);
-  render();
+
+Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode,addBriefingQuestion,editBriefingQuestion,deleteBriefingQuestion,toggleBriefingQuestion,moveBriefingQuestion,releaseBriefingEdit,lockBriefingEdit,createRecommendedBriefingQuestions,showBriefingModel,showClientWorkspace});
+
+function setPrintMode(mode){
+  document.body.setAttribute('data-print-mode', mode);
+  setTimeout(()=>window.print(), 120);
+}
+function printDevelopment(){setPrintMode('development');}
+function printCalendar(){setPrintMode('calendar');}
+function printFullProject(){setPrintMode('full');}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2)}
+function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'}
+function closeModals(){document.querySelectorAll('.modal').forEach(m=>m.classList.remove('active'))}
+
+function formatText(cmd,value=null){
+  document.execCommand(cmd,false,value);
+}
+function formatHighlight(){
+  document.execCommand('foreColor',false,'#FFFFFF');
+  document.execCommand('backColor',false,'#111111');
+}
+function clearFormat(){
+  document.execCommand('removeFormat',false,null);
+  document.execCommand('foreColor',false,'#1C1C1C');
+}
+function setTextSize(size){
+  document.execCommand('fontSize', false, '7');
+  document.querySelectorAll('font[size="7"]').forEach(el=>{
+    const span=document.createElement('span');
+    span.style.fontSize=size;
+    span.innerHTML=el.innerHTML;
+    el.replaceWith(span);
+  });
+}
+function normalizeEditor(){
+  const selection=window.getSelection();
+  let target=null;
+  if(selection && selection.anchorNode){
+    target=selection.anchorNode.nodeType===1?selection.anchorNode:selection.anchorNode.parentElement;
+    target=target?.closest?.('.rich-editor');
+  }
+  if(!target)target=document.activeElement?.closest?.('.rich-editor')||document.activeElement;
+  if(!target || !target.classList?.contains('rich-editor'))return;
+  const text=target.innerText;
+  target.innerHTML=text.replace(/\n/g,'<br>');
+  target.style.fontSize='';
+  target.style.fontFamily='';
+  target.style.color='';
+}
+function pasteClean(e){
+  e.preventDefault();
+  const text=(e.clipboardData||window.clipboardData).getData('text/plain');
+  document.execCommand('insertText',false,text);
 }
 
-function statusPill(status){
-  if(status==='Aprovado')return '<span class="pill green">Aprovado</span>';
-  if(status==='Ajustes solicitados')return '<span class="pill yellow">Ajustes</span>';
-  if(status==='Bloqueado')return '<span class="pill lock">Bloqueado</span>';
-  if(status==='Em andamento'||status==='Em desenvolvimento')return '<span class="pill purple">'+status+'</span>';
-  return '<span class="pill yellow">'+status+'</span>';
+function htmlToText(html){
+  const div=document.createElement('div');
+  div.innerHTML=html||'';
+  return div.innerText||'';
 }
-
-function progress(p){
-  let n=0;
-  if(p.strategicStatus==='Aprovado')n+=25;
-  if(p.productionStatus==='Aprovado')n+=25;
-  if(p.calendarStatus==='Aprovado')n+=25;
-  if(p.approvalStatus==='Finalizado')n+=25;
-  return n;
-}
-
-function renderDashboard(){
-  const projects=data.clients.flatMap(c=>c.projects.map(p=>({c,p})));
-  dashboard.innerHTML=`
-    <div class="dashboard-card"><span class="muted">Clientes</span><strong>${data.clients.length}</strong></div>
-    <div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div>
-    <div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.p.strategicStatus!=='Aprovado').length}</strong></div>
-    <div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x.p)===100).length}</strong></div>`;
-}
-
-function renderClients(){
-  const q=(searchClient.value||'').toLowerCase();
-  const list=data.clients.filter(c=>c.name.toLowerCase().includes(q));
-  clientsList.innerHTML=list.length?list.map(c=>`
-    <div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')">
-      <h3>${c.name}</h3>
-      <div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>${c.projects.length} projeto(s)</div>
-      <div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${c.projects[0]?statusPill(c.projects[0].strategicStatus):''}</div>
-    </div>`).join(''):'<div class="empty">Nenhum cliente.</div>';
-}
-
-function renderWorkspace(){
-  const c=currentClient();
-  if(!c){workspace.innerHTML='<div class="empty">Cadastre ou selecione um cliente.</div>';return}
-  if(!selectedProjectId&&c.projects[0])selectedProjectId=c.projects[0].id;
-  const p=currentProject();
-  workspace.innerHTML=`
-    <div class="panel">
-      <div class="top" style="margin:0">
-        <div>
-          <h2>${c.name}</h2>
-          <p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p>
-        </div>
-        <button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button>
-      </div>
-      <div class="actions">
-        <button onclick="openProjectModal()">+ Novo projeto/mês</button>
-        <button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button>
-      </div>
+function richField(label,id,value){
+  return `<div class="content-box rich-box">
+    <label>${label}</label>
+    <div class="rich-toolbar">
+      <button type="button" onclick="setTextSize('14px')" title="Texto pequeno">Pequeno</button><button type="button" onclick="setTextSize('16px')" title="Texto normal">Normal</button><button type="button" onclick="setTextSize('20px')" title="Subtítulo">Subtítulo</button><button type="button" onclick="setTextSize('26px')" title="Título">Título</button><button type="button" onclick="formatText('bold')" title="Negrito">B</button><button type="button" onclick="formatText('foreColor','#5B56FF')" title="Letra roxa">Roxo</button><button type="button" onclick="formatText('foreColor','#1C1C1C')" title="Letra preta">Preto</button><button type="button" onclick="formatText('foreColor','#FFFFFF')" title="Letra branca">Branco</button><button type="button" onclick="formatHighlight()" title="Fundo preto com letra branca">Destaque</button><button type="button" onclick="normalizeEditor()" title="Padronizar texto deste campo">Normalizar</button><button type="button" onclick="clearFormat()" title="Remover formatação">Limpar</button>
     </div>
-    ${renderProjects(c)}
-    ${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`;
+    <div class="rich-editor" onpaste="pasteClean(event)" id="${id}" contenteditable="true" oninput="this.dataset.changed='1'">${value||''}</div>
+  </div>`;
+}
+function richValue(id,fallback=''){
+  const el=document.getElementById(id);
+  if(!el)return fallback||'';
+  return el.innerHTML;
 }
 
-function renderProjects(c){
-  if(!c.projects.length)return '';
-  return `<div class="project-list">${c.projects.map(x=>`
-    <div class="project-card ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')">
-      <h3>${x.period}</h3>
-      <div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div>
-      <div class="progress"><span style="width:${progress(x)}%"></span></div>
-    </div>`).join('')}</div>`;
+function statusPill(s){if(s==='Aprovado')return'<span class="pill green">Aprovado</span>';if(s==='Ajustes solicitados')return'<span class="pill yellow">Ajustes</span>';if(s==='Bloqueado')return'<span class="pill lock">Bloqueado</span>';if(s==='Em andamento'||s==='Em desenvolvimento')return'<span class="pill purple">'+s+'</span>';return'<span class="pill yellow">'+s+'</span>'}
+function progress(p){let n=0;if(p.strategicStatus==='Aprovado')n+=25;if(p.productionStatus==='Aprovado')n+=25;if(p.calendarStatus==='Aprovado')n+=25;if(p.approvalStatus==='Finalizado')n+=25;return n}
+
+function defaultChecklist(type){
+  if(type === 'roteiro'){
+    return [
+      {label:'Conteúdo criado',done:false},
+      {label:'Revisado internamente',done:false},
+      {label:'Cliente aprovou',done:false},
+      {label:'Gravado',done:false},
+      {label:'Editado',done:false},
+      {label:'Legenda pronta',done:false},
+      {label:'Publicado',done:false}
+    ];
+  }
+  return [
+    {label:'Conteúdo criado',done:false},
+    {label:'Revisado internamente',done:false},
+    {label:'Cliente aprovou',done:false},
+    {label:'Arte criada',done:false},
+    {label:'Legenda pronta',done:false},
+    {label:'Publicado',done:false}
+  ];
+}
+function newContentItem(type){
+  const map={roteiro:'Roteiro',carrossel:'Carrossel',estatico:'Estático'};
+  return {
+    id:uid(),
+    type,
+    title:map[type]||'Conteúdo',
+    driveLink:'',
+    postDate:'',
+    week:'Semana 1',
+    itemStatus:'Em criação',
+    responsible:'',
+    fields:{tema:'',objetivo:'',gancho:'',desenvolvimento:'',cta:'',slides:'',mensagem:'',legenda:''},
+    checklist:defaultChecklist(type),
+    note:''
+  }
+}
+function baseProject(period,clientId){return{clientId,period,strategicStatus:'Aguardando aprovação',productionStatus:'Bloqueado',calendarStatus:'Bloqueado',approvalStatus:'Bloqueado',history:['Equipe Humaniza criou o projeto.'],strategic:{macro:'Objetivo principal do mês.',editorial:'Autoridade, conexão, prova e conversão.',themes:'Tema 01\nTema 02\nTema 03\nTema 04',creative:'Tom humano, claro e estratégico.',note:''},production:{items:[newContentItem('roteiro'),newContentItem('carrossel'),newContentItem('estatico')],note:''},calendar:{content:'Calendário Editorial\n\n01/07:\nFormato:\nTema:\nStatus:',note:''}}}
+
+async function loadData(){clients=(await getDocs(collection(db,'hubClients'))).docs.map(d=>({id:d.id,...d.data()}));projects=(await getDocs(collection(db,'hubProjects'))).docs.map(d=>({id:d.id,...d.data()}));if(selectedClientId&&!clients.find(c=>c.id===selectedClientId))selectedClientId=clients[0]?.id||null;if(!selectedClientId&&clients[0])selectedClientId=clients[0].id;let ps=projects.filter(p=>p.clientId===selectedClientId);if(selectedProjectId&&!ps.find(p=>p.id===selectedProjectId))selectedProjectId=ps[0]?.id||null;if(!selectedProjectId&&ps[0])selectedProjectId=ps[0].id;localStorage.setItem('hubSelectedClient',selectedClientId||'');localStorage.setItem('hubSelectedProject',selectedProjectId||'');render()}
+function currentClient(){return clients.find(c=>c.id===selectedClientId)}
+function currentProject(){return projects.find(p=>p.id===selectedProjectId)}
+function openClientModal(){clientName.value='';clientEmail.value='';responsibleName.value='';responsiblePhone.value='';clientStatus.value='Ativo';clientAccess.value='Liberado';clientObs.value='';clientModal.classList.add('active')}
+function openProjectModal(){if(!clients.length){alert('Cadastre um cliente primeiro.');return}projectClient.innerHTML=clients.map(c=>`<option value="${c.id}" ${c.id===selectedClientId?'selected':''}>${c.name}</option>`).join('');updateCopyOptions();projectClient.onchange=updateCopyOptions;projectPeriod.value='';projectModal.classList.add('active')}
+function updateCopyOptions(){let list=projects.filter(p=>p.clientId===projectClient.value);projectCopy.innerHTML='<option value="">Começar em branco</option>'+list.map(p=>`<option value="${p.id}">Duplicar ${p.period}</option>`).join('')}
+async function saveClient(){let name=clientName.value.trim();if(!name){alert('Coloque o nome do cliente.');return}let r=await addDoc(collection(db,'hubClients'),{name,email:clientEmail.value.trim(),responsibleName:responsibleName.value.trim(),responsiblePhone:responsiblePhone.value.trim().replace(/\D/g,''),status:clientStatus.value,access:clientAccess.value,obs:clientObs.value.trim(),createdAt:serverTimestamp(),updatedAt:serverTimestamp()});selectedClientId=r.id;selectedProjectId=null;closeModals();await loadData()}
+async function saveProject(){let clientId=projectClient.value,period=projectPeriod.value.trim();if(!period){alert('Coloque o período.');return}let data,copyId=projectCopy.value;if(copyId){let old=projects.find(p=>p.id===copyId);data=JSON.parse(JSON.stringify(old));delete data.id;data.period=period;data.clientId=clientId;data.history=['Equipe Humaniza criou o projeto duplicando '+old.period+'.'];data.strategicStatus='Aguardando aprovação';data.productionStatus='Bloqueado';data.calendarStatus='Bloqueado';data.approvalStatus='Bloqueado'}else data=baseProject(period,clientId);data.createdAt=serverTimestamp();data.updatedAt=serverTimestamp();let r=await addDoc(collection(db,'hubProjects'),data);selectedClientId=clientId;selectedProjectId=r.id;closeModals();await loadData()}
+function selectClient(id){selectedClientId=id;selectedProjectId=projects.filter(p=>p.clientId===id)[0]?.id||null;localStorage.setItem('hubSelectedClient',id);localStorage.setItem('hubSelectedProject',selectedProjectId||'');render()}
+function selectProject(id){selectedProjectId=id;localStorage.setItem('hubSelectedProject',id);render()}
+function renderDashboard(){dashboard.innerHTML=`<div class="dashboard-card"><span class="muted">Clientes</span><strong>${clients.length}</strong></div><div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div><div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.strategicStatus!=='Aprovado').length}</strong></div><div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x)===100).length}</strong></div>`}
+function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clients.filter(c=>c.name.toLowerCase().includes(q));clientsList.innerHTML=list.length?list.map(c=>{let count=projects.filter(p=>p.clientId===c.id).length,first=projects.find(p=>p.clientId===c.id);return`<div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')"><h3>${c.name}</h3><div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>${count} projeto(s)</div><div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${first?statusPill(first.strategicStatus):''}</div></div>`}).join(''):'<div class="empty">Nenhum cliente.</div>'}
+
+function normalizeFilterText(value){
+  const div=document.createElement('div');
+  div.innerHTML=value||'';
+  return (div.innerText||div.textContent||'')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'');
 }
 
-function stepClass(status){
-  if(status==='Aprovado')return 'done';
-  if(status==='Bloqueado')return 'locked';
-  return 'active';
-}
-
-function renderProjectDetail(c,p,isAdminView){
-  return `
-    <div class="stage">
-      <div class="stage-head">
-        <div><h2>Projeto ${p.period}</h2><p>Etapas liberadas conforme aprovação.</p></div>
-        <span class="pill">${progress(p)}%</span>
-      </div>
-      <div class="flow">
-        <div class="step ${stepClass(p.strategicStatus)}"><b>01 Planejamento</b><br>${p.strategicStatus}</div>
-        <div class="step ${stepClass(p.productionStatus)}"><b>02 Desenvolvimento</b><br>${p.productionStatus}</div>
-        <div class="step ${stepClass(p.calendarStatus)}"><b>03 Calendário</b><br>${p.calendarStatus}</div>
-        <div class="step ${stepClass(p.approvalStatus)}"><b>04 Aprovações</b><br>${p.approvalStatus}</div>
-      </div>
+function renderContentFilters(scope){
+  return `<div class="admin-control-panel no-print">
+    <div class="control-head">
+      <h3>Localizar conteúdos</h3>
+      <p>Use a busca, a semana e o status para encontrar um conteúdo com mais facilidade.</p>
     </div>
-    ${stageStrategic(p,isAdminView)}
-    ${stageProduction(p,isAdminView)}
-    ${stageCalendar(p,isAdminView)}
-    <div class="stage">
-      <h2>Histórico</h2>
-      <div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div>
-    </div>`;
-}
-
-function field(label,id,value,isAdminView){
-  if(isAdminView)return `<div class="content-box"><label>${label}</label><textarea id="${id}" oninput="autoGrow(this)">${value||''}</textarea></div>`;
-  return `<div class="content-box"><label>${label}</label><div class="readonly-box">${value||''}</div></div>`;
-}
-
-function stageStrategic(p,isAdminView){
-  return `<div class="stage">
-    <div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>A produção só libera após essa aprovação.</p></div>${statusPill(p.strategicStatus)}</div>
-    <div class="content-grid">
-      ${field('Visão Macro','strategic_macro',p.strategic.macro,isAdminView)}
-      ${field('Linha Editorial','strategic_editorial',p.strategic.editorial,isAdminView)}
-      ${field('Temas do mês','strategic_themes',p.strategic.themes,isAdminView)}
-      ${field('Direção Criativa','strategic_creative',p.strategic.creative,isAdminView)}
+    <div class="control-grid">
+      <label class="control-field">
+        <span>Buscar palavra</span>
+        <input id="${scope}_content_search" placeholder="Tema, objetivo, gancho, CTA..." oninput="applyAdminContentFilters('${scope}')">
+      </label>
+      <label class="control-field">
+        <span>Semana</span>
+        <select id="${scope}_content_week" onchange="applyAdminContentFilters('${scope}')">
+          <option value="">Todas</option>
+          <option>Semana 1</option>
+          <option>Semana 2</option>
+          <option>Semana 3</option>
+          <option>Semana 4</option>
+          <option>Semana 5</option>
+        </select>
+      </label>
+      <label class="control-field">
+        <span>Status</span>
+        <select id="${scope}_content_status" onchange="applyAdminContentFilters('${scope}')">
+          <option value="">Todos</option>
+          <option>Em criação</option>
+          <option>Aguardando aprovação</option>
+          <option>Aprovado</option>
+          <option>Ajustes</option>
+          <option>Postado</option>
+        </select>
+      </label>
+      <label class="control-field">
+        <span>Resultados</span>
+        <div class="pills"><span class="pill purple" id="${scope}_content_count">Todos</span></div>
+      </label>
     </div>
-    <label>Observações do cliente</label>
-    <textarea class="note" id="strategic_note" oninput="autoGrow(this)">${p.strategic.note||''}</textarea>
     <div class="actions">
-      <button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button>
-      <button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button>
+      <button class="btn-dark" type="button" onclick="clearAdminContentFilters('${scope}')">Limpar filtros</button>
     </div>
   </div>`;
 }
 
-function stageProduction(p,isAdminView){
-  return `<div class="stage ${p.productionStatus==='Bloqueado'?'locked':''}">
-    <div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>Produção seguindo exatamente o planejamento aprovado.</p></div>${statusPill(p.productionStatus)}</div>
-    ${p.productionStatus==='Bloqueado'?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`
-      <div class="content-grid">
-        ${field('Roteiros','production_reels',p.production.reels,isAdminView)}
-        ${field('Carrosséis','production_carousel',p.production.carousel,isAdminView)}
-        ${field('Estático','production_staticPost',p.production.staticPost,isAdminView)}
-        ${field('Captação','production_capture',p.production.capture,isAdminView)}
-      </div>
-      <label>Observações do cliente</label>
-      <textarea class="note" id="production_note" oninput="autoGrow(this)">${p.production.note||''}</textarea>
-      <div class="actions">
-        <button class="btn-green" onclick="approveProduction()">Aprovar desenvolvimento</button>
-        <button class="btn-yellow" onclick="requestAdjust('production')">Solicitar ajustes</button>
-      </div>`}
+function applyAdminContentFilters(scope='admin'){
+  const search=normalizeFilterText(document.getElementById(scope+'_content_search')?.value||'');
+  const week=document.getElementById(scope+'_content_week')?.value||'';
+  const status=document.getElementById(scope+'_content_status')?.value||'';
+  const items=[...document.querySelectorAll(`.content-item[data-filter-scope="${scope}"]`)];
+  let visible=0;
+
+  items.forEach(item=>{
+    const text=normalizeFilterText(item.dataset.search||item.innerText);
+    const matchesSearch=!search||text.includes(search);
+    const matchesWeek=!week||item.dataset.week===week;
+    const matchesStatus=!status||item.dataset.status===status;
+    const show=matchesSearch&&matchesWeek&&matchesStatus;
+    item.classList.toggle('hidden',!show);
+    if(show)visible++;
+  });
+
+  const count=document.getElementById(scope+'_content_count');
+  if(count)count.textContent=items.length?`${visible} de ${items.length}`:'Nenhum';
+  const empty=document.getElementById(scope+'_content_empty');
+  if(empty)empty.classList.toggle('hidden',visible!==0||items.length===0);
+}
+
+function clearAdminContentFilters(scope='admin'){
+  const ids=[scope+'_content_search',scope+'_content_week',scope+'_content_status'];
+  ids.forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.value='';
+  });
+  applyAdminContentFilters(scope);
+}
+
+function escapeHtml(value){
+  return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+}
+function questionTypeLabel(type){
+  return ({text:'Resposta curta',textarea:'Resposta longa',number:'Número',date:'Data',url:'Link',yesno:'Sim ou não'})[type]||'Resposta longa';
+}
+function questionsForClient(clientId){
+  return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===clientId)).sort((a,b)=>(a.order||0)-(b.order||0));
+}
+
+function showBriefingModel(){
+  adminView='briefing-model';
+  localStorage.setItem('hubAdminView',adminView);
+  renderWorkspace();
+}
+function showClientWorkspace(){
+  adminView='client';
+  localStorage.setItem('hubAdminView',adminView);
+  renderWorkspace();
+}
+function renderBriefingModel(){
+  const ordered=[...briefingQuestions].sort((a,b)=>(a.order||0)-(b.order||0));
+  return `<div class="panel">
+    <div class="top" style="margin:0">
+      <div><h2>Modelo de Briefing</h2><p class="muted">Gerencie todas as perguntas que poderão aparecer nos briefings dos clientes.</p></div>
+      <button class="btn-dark" onclick="showClientWorkspace()">Voltar aos clientes</button>
+    </div>
+    <div class="actions">
+      <button onclick="addBriefingQuestion(true)">+ Nova pergunta</button>
+      ${!briefingQuestions.length?'<button class="btn-dark" onclick="createRecommendedBriefingQuestions()">Importar perguntas padrão</button>':''}
+    </div>
+    <div class="admin-control-panel">
+      <div class="control-head"><h3>Todas as perguntas</h3><p>As perguntas desativadas continuam visíveis aqui para você corrigir, reativar ou excluir.</p></div>
+      ${ordered.length?ordered.map((q,index)=>{
+        const clientName=q.clientId?(clients.find(c=>c.id===q.clientId)?.name||'Cliente não encontrado'):'Todos os clientes';
+        return `<div class="content-box">
+          <label>${index+1}. ${escapeHtml(q.text)}</label>
+          ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
+          <div class="pills"><span class="pill">${questionTypeLabel(q.type)}</span><span class="pill ${q.required!==false?'green':'yellow'}">${q.required!==false?'Obrigatória':'Opcional'}</span><span class="pill ${q.active!==false?'purple':'lock'}">${q.active!==false?'Ativa':'Desativada'}</span><span class="pill">${escapeHtml(clientName)}</span></div>
+          <div class="actions"><button class="btn-dark" onclick="editBriefingQuestion('${q.id}')">Editar</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',-1)">Subir</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',1)">Descer</button><button class="btn-yellow" onclick="toggleBriefingQuestion('${q.id}')">${q.active!==false?'Desativar':'Ativar'}</button><button class="btn-danger" onclick="deleteBriefingQuestion('${q.id}')">Excluir</button></div>
+        </div>`;
+      }).join(''):'<div class="empty">Nenhuma pergunta cadastrada. Clique em Importar perguntas padrão.</div>'}
+    </div>
   </div>`;
 }
 
-function stageCalendar(p,isAdminView){
-  return `<div class="stage ${p.calendarStatus==='Bloqueado'?'locked':''}">
-    <div class="stage-head"><div><h2>03 Calendário Editorial</h2><p>Organização de datas, formatos e temas.</p></div>${statusPill(p.calendarStatus)}</div>
-    ${p.calendarStatus==='Bloqueado'?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`
-      ${field('Calendário Editorial','calendar_content',p.calendar.content,isAdminView)}
-      <label>Observações do cliente</label>
-      <textarea class="note" id="calendar_note" oninput="autoGrow(this)">${p.calendar.note||''}</textarea>
-      <div class="actions">
-        <button class="btn-green" onclick="approveCalendar()">Aprovar calendário</button>
-        <button class="btn-yellow" onclick="requestAdjust('calendar')">Solicitar ajustes</button>
-      </div>`}
+function latestBriefingAnswer(clientId){
+  return briefingAnswers.filter(a=>a.clientId===clientId).sort((a,b)=>(b.version||0)-(a.version||0))[0]||null;
+}
+function renderAnswerValue(value){
+  if(value===undefined||value===null||value==='')return 'Não informado';
+  return escapeHtml(value).replace(/\n/g,'<br>');
+}
+function renderBriefingAdmin(c){
+  const questions=briefingQuestions.filter(q=>!q.clientId||q.clientId===c.id).sort((a,b)=>(a.order||0)-(b.order||0));
+  const latest=latestBriefingAnswer(c.id);
+  const answered=c.briefingStatus==='Respondido'||!!latest;
+  const editAllowed=c.briefingEditAllowed===true;
+  const status=editAllowed?'Liberado para edição':answered?'Respondido e bloqueado':'Pendente';
+  const statusClass=editAllowed?'purple':answered?'green':'yellow';
+  return `<div class="stage">
+    <div class="stage-head">
+      <div><h2>Briefing do cliente</h2><p>O briefing pertence a ${escapeHtml(c.name)} e fica bloqueado após cada envio.</p></div>
+      <span class="pill ${statusClass}">${status}</span>
+    </div>
+    <div class="actions">
+      <button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
+      ${answered&&!editAllowed?'<button class="btn-green" onclick="releaseBriefingEdit()">Liberar nova edição</button>':''}
+      ${editAllowed?'<button class="btn-yellow" onclick="lockBriefingEdit()">Bloquear edição</button>':''}
+      <button onclick="addBriefingQuestion()">+ Adicionar pergunta</button>
+      ${!briefingQuestions.length?'<button class="btn-dark" onclick="createRecommendedBriefingQuestions()">Criar perguntas recomendadas</button>':''}
+    </div>
+    <div class="admin-control-panel">
+      <div class="control-head"><h3>Gerenciar perguntas</h3><p>Somente o administrador pode criar, editar, excluir e reorganizar perguntas.</p></div>
+      ${questions.length?questions.map((q,index)=>`<div class="content-box">
+        <label>${index+1}. ${escapeHtml(q.text)}</label>
+        ${q.description?`<div class="muted">${escapeHtml(q.description)}</div>`:''}
+        <div class="pills"><span class="pill">${questionTypeLabel(q.type)}</span><span class="pill ${q.required!==false?'green':'yellow'}">${q.required!==false?'Obrigatória':'Opcional'}</span><span class="pill ${q.active!==false?'purple':'lock'}">${q.active!==false?'Ativa':'Desativada'}</span><span class="pill">${q.clientId?'Somente este cliente':'Todos os clientes'}</span></div>
+        <div class="actions"><button class="btn-dark" onclick="editBriefingQuestion('${q.id}')">Editar</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',-1)">Subir</button><button class="btn-dark" onclick="moveBriefingQuestion('${q.id}',1)">Descer</button><button class="btn-yellow" onclick="toggleBriefingQuestion('${q.id}')">${q.active!==false?'Desativar':'Ativar'}</button><button class="btn-danger" onclick="deleteBriefingQuestion('${q.id}')">Excluir</button></div>
+      </div>`).join(''):'<div class="empty">Nenhuma pergunta cadastrada.</div>'}
+    </div>
+    ${latest?`<div class="content-grid">${questionsForClient(c.id).map(q=>`<div class="content-box"><label>${escapeHtml(q.text)}</label><div class="readonly-box">${renderAnswerValue(latest.answers?.[q.id])}</div></div>`).join('')}</div><p class="muted">Versão ${latest.version||1} • Enviado em ${escapeHtml(latest.answeredAt||'data não informada')}</p>`:''}
   </div>`;
 }
 
-function saveCurrentFields(){
-  const p=currentProject();
-  if(!p)return;
-  const g=id=>document.getElementById(id)?.value;
-  if(g('strategic_macro')!==undefined)p.strategic.macro=g('strategic_macro');
-  if(g('strategic_editorial')!==undefined)p.strategic.editorial=g('strategic_editorial');
-  if(g('strategic_themes')!==undefined)p.strategic.themes=g('strategic_themes');
-  if(g('strategic_creative')!==undefined)p.strategic.creative=g('strategic_creative');
-  if(g('strategic_note')!==undefined)p.strategic.note=g('strategic_note');
-  if(g('production_reels')!==undefined)p.production.reels=g('production_reels');
-  if(g('production_carousel')!==undefined)p.production.carousel=g('production_carousel');
-  if(g('production_staticPost')!==undefined)p.production.staticPost=g('production_staticPost');
-  if(g('production_capture')!==undefined)p.production.capture=g('production_capture');
-  if(g('production_note')!==undefined)p.production.note=g('production_note');
-  if(g('calendar_content')!==undefined)p.calendar.content=g('calendar_content');
-  if(g('calendar_note')!==undefined)p.calendar.note=g('calendar_note');
-  saveAll();
+async function addBriefingQuestion(fromModel=false){
+  const c=currentClient();
+  if(!fromModel&&!c)return;
+  const text=prompt('Digite a pergunta:'); if(!text?.trim())return;
+  const description=prompt('Orientação opcional para o cliente:')||'';
+  const type=(prompt('Tipo: text, textarea, number, date, url ou yesno','textarea')||'textarea').toLowerCase();
+  const required=confirm('Essa pergunta será obrigatória?');
+  const onlyClient=!!c&&confirm('Esta pergunta deve aparecer somente para o cliente selecionado?');
+  const maxOrder=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
+  await addDoc(collection(db,'hubBriefingQuestions'),{text:text.trim(),description:description.trim(),type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,active:true,clientId:onlyClient&&c?c.id:null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+}
+async function editBriefingQuestion(id){
+  const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
+  const text=prompt('Edite a pergunta:',q.text); if(!text?.trim())return;
+  const description=prompt('Edite a orientação:',q.description||'')||'';
+  const type=(prompt('Tipo: text, textarea, number, date, url ou yesno',q.type||'textarea')||q.type||'textarea').toLowerCase();
+  const required=confirm('Clique em OK para obrigatória ou Cancelar para opcional.');
+  await updateDoc(doc(db,'hubBriefingQuestions',id),{text:text.trim(),description:description.trim(),type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,updatedAt:serverTimestamp()});
+}
+async function deleteBriefingQuestion(id){
+  if(!confirm('Excluir esta pergunta? As respostas antigas continuarão preservadas no histórico.'))return;
+  await deleteDoc(doc(db,'hubBriefingQuestions',id));
+}
+async function toggleBriefingQuestion(id){
+  const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
+  await updateDoc(doc(db,'hubBriefingQuestions',id),{active:q.active===false,updatedAt:serverTimestamp()});
+}
+async function moveBriefingQuestion(id,direction){
+  const ordered=[...briefingQuestions].sort((a,b)=>(a.order||0)-(b.order||0));
+  const index=ordered.findIndex(q=>q.id===id), swap=index+direction;
+  if(index<0||swap<0||swap>=ordered.length)return;
+  const a=ordered[index],b=ordered[swap],ao=a.order||index+1,bo=b.order||swap+1;
+  await Promise.all([updateDoc(doc(db,'hubBriefingQuestions',a.id),{order:bo,updatedAt:serverTimestamp()}),updateDoc(doc(db,'hubBriefingQuestions',b.id),{order:ao,updatedAt:serverTimestamp()})]);
+}
+async function releaseBriefingEdit(){
+  const c=currentClient(); if(!c)return;
+  await updateDoc(doc(db,'hubClients',c.id),{briefingEditAllowed:true,briefingStatus:'Liberado para edição',updatedAt:serverTimestamp()});
+  alert('Edição do briefing liberada para este cliente.');
+}
+async function lockBriefingEdit(){
+  const c=currentClient(); if(!c)return;
+  await updateDoc(doc(db,'hubClients',c.id),{briefingEditAllowed:false,briefingStatus:latestBriefingAnswer(c.id)?'Respondido':'Pendente',updatedAt:serverTimestamp()});
+  alert('Edição do briefing bloqueada.');
+}
+async function createRecommendedBriefingQuestions(){
+  const recommended=[
+    ['Nome da empresa','text'],['Nome do responsável','text'],['Qual é o principal objetivo da empresa nas redes sociais?','textarea'],['Qual resultado vocês esperam alcançar nos próximos meses?','textarea'],['Quais serviços ou produtos devem receber mais destaque?','textarea'],['Qual serviço ou produto gera mais resultado para a empresa?','textarea'],['Quem é o público ideal da empresa?','textarea'],['Quais dores, dúvidas e desejos esse público possui?','textarea'],['O que normalmente impede esse público de comprar?','textarea'],['Como a empresa deseja ser percebida?','textarea'],['Quais são os principais diferenciais da empresa?','textarea'],['Por que um cliente deveria escolher a empresa?','textarea'],['Quem são os principais concorrentes ou referências?','textarea'],['Como funciona o processo de atendimento e venda?','textarea'],['Quais são as principais objeções recebidas?','textarea'],['Quem pode aparecer nos conteúdos e vídeos?','textarea'],['Quais dúvidas os clientes mais fazem?','textarea'],['O que já funcionou ou não funcionou no marketing?','textarea'],['Existem datas, campanhas, eventos ou lançamentos importantes?','textarea'],['Existe alguma informação adicional que a equipe precisa saber?','textarea']
+  ];
+  if(!confirm('Criar as perguntas estratégicas recomendadas para todos os clientes?'))return;
+  for(let i=0;i<recommended.length;i++)await addDoc(collection(db,'hubBriefingQuestions'),{text:recommended[i][0],description:'',type:recommended[i][1],required:true,active:true,clientId:null,order:i+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+  alert('Perguntas recomendadas criadas.');
 }
 
-function addHistory(p,text){p.history.unshift(new Date().toLocaleString('pt-BR')+' • '+text)}
-
-function send(c,msg){
-  if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}
-  window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank');
-}
-
-function approveStrategic(){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  p.strategicStatus='Aprovado';
-  p.productionStatus='Em desenvolvimento';
-  addHistory(p,'Planejamento aprovado. Desenvolvimento liberado.');
-  saveAll();render();
-  send(c,`✅ PLANEJAMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nA produção pode iniciar seguindo exatamente o planejamento aprovado.`);
-}
-
-function approveProduction(){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  p.productionStatus='Aprovado';
-  p.calendarStatus='Em desenvolvimento';
-  addHistory(p,'Desenvolvimento aprovado. Calendário liberado.');
-  saveAll();render();
-  send(c,`✅ DESENVOLVIMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nCalendário Editorial liberado.`);
-}
-
-function approveCalendar(){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  p.calendarStatus='Aprovado';
-  p.approvalStatus='Em andamento';
-  addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.');
-  saveAll();render();
-  send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);
-}
-
-function requestAdjust(type){
-  saveCurrentFields();
-  const c=currentClient(),p=currentProject();
-  const map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};
-  p[map[type][0]]='Ajustes solicitados';
-  addHistory(p,'Ajustes solicitados em '+map[type][1]+'.');
-  saveAll();render();
-  send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);
-}
-
-function deleteClient(id){
-  if(!confirm('Excluir cliente e todos os projetos dele?'))return;
-  data.clients=data.clients.filter(c=>c.id!==id);
-  selectedClientId=data.clients[0]?.id||null;
-  selectedProjectId=data.clients[0]?.projects[0]?.id||null;
-  saveAll();render();
-}
-
-function copyClientLink(){
+function copyBriefingLink(){
   const c=currentClient();
   if(!c)return;
-  const link=location.href.split('#')[0]+'#cliente='+c.id;
+  const link=window.location.origin+'/cliente.html?id='+c.id+'&briefing=1';
   navigator.clipboard?.writeText(link);
-  alert('Link do cliente copiado. Nesta versão de teste, ele abre a visão do cliente no mesmo navegador.');
+  alert('Link do briefing copiado: '+link);
 }
 
-function renderClientPortal(){
-  const hash=location.hash.replace('#cliente=','');
-  if(hash && data.clients.find(c=>c.id===hash))selectedClientId=hash;
-  const c=currentClient() || data.clients[0];
-  if(!c){clientPortal.innerHTML='<div class="empty">Nenhum cliente cadastrado ainda.</div>';return}
-  selectedClientId=c.id;
-  if(!selectedProjectId&&c.projects[0])selectedProjectId=c.projects[0].id;
-  const p=currentProject() || c.projects[0];
-  if(p)selectedProjectId=p.id;
-  clientPortal.innerHTML=`
-    <div class="client-hero">
-      <h1>Olá, ${c.name}</h1>
-      <p class="muted">Bem-vindo ao Portal Humaniza. Aqui você acompanha apenas os seus projetos, comenta, aprova ou solicita ajustes.</p>
-      <div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span></div>
+function renderWorkspace(){if(adminView==='briefing-model'){workspace.innerHTML=renderBriefingModel();return}let c=currentClient();if(!c){workspace.innerHTML='<div class="panel"><div class="actions"><button class="btn-dark" onclick="showBriefingModel()">Modelo de Briefing</button></div><div class="empty">Cadastre ou selecione um cliente.</div></div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p></div><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div><div class="actions"><button class="btn-dark" onclick="showBriefingModel()">Modelo de Briefing</button><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button><button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
+        <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
+        <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
+        <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button>
+        <button class="btn-dark" onclick="printFullProject()">Salvar projeto em PDF</button>
+        <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
+        <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button></div></div>${renderBriefingAdmin(c)}${renderProjects(c)}${p?renderProjectDetail(c,p,true):'<div class="empty">Esse cliente ainda não tem projetos. Clique em + Novo projeto/mês.</div>'}`}
+function renderProjects(c){let list=projects.filter(p=>p.clientId===c.id);if(!list.length)return'';return`<div class="project-list">${list.map(x=>`<div class="project-card ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}</div>`}
+function stepClass(s){if(s==='Aprovado')return'done';if(s==='Bloqueado')return'locked';return'active'}
+function renderProjectDetail(c,p,isAdmin){return`<div class="stage"><div class="stage-head"><div><h2>Projeto ${p.period}</h2><p>Etapas liberadas conforme aprovação.</p></div><span class="pill">${progress(p)}%</span></div><div class="flow"><div class="step ${stepClass(p.strategicStatus)}"><b>01 Planejamento</b><br>${p.strategicStatus}</div><div class="step ${stepClass(p.productionStatus)}"><b>02 Desenvolvimento</b><br>${p.productionStatus}</div><div class="step ${stepClass(p.calendarStatus)}"><b>03 Calendário</b><br>${p.calendarStatus}</div><div class="step ${stepClass(p.approvalStatus)}"><b>04 Aprovações</b><br>${p.approvalStatus}</div></div></div>${isAdmin?adminControls(c,p):''}${stageStrategic(p,isAdmin)}${stageProduction(p,isAdmin)}${stageCalendar(p,isAdmin)}${stageApproval(p,isAdmin)}<div class="stage"><h2>Histórico</h2><div class="timeline">${(p.history||[]).map(h=>`<div>${h}</div>`).join('')}</div></div>`}
+function field(label,id,value,isAdmin){
+  if(isAdmin)return richField(label,id,value);
+  return `<div class="content-box"><label>${label}</label><div class="readonly-box">${value||''}</div></div>`;
+}
+function stageStrategic(p,isAdmin){return`<div class="stage"><div class="stage-head"><div><h2>01 Planejamento Estratégico</h2><p>A produção só libera após essa aprovação.</p></div>${statusPill(p.strategicStatus)}</div>${isAdmin?stageControl('strategic',p.strategicStatus):''}<div class="content-grid">${field('Visão Macro','strategic_macro',p.strategic?.macro,isAdmin)}${field('Linha Editorial','strategic_editorial',p.strategic?.editorial,isAdmin)}${field('Temas do mês','strategic_themes',p.strategic?.themes,isAdmin)}${field('Direção Criativa','strategic_creative',p.strategic?.creative,isAdmin)}</div><label>Observações do cliente</label><textarea class="note" id="strategic_note" oninput="autoGrow(this)">${p.strategic?.note||''}</textarea><div class="actions"><button class="btn-dark" onclick="saveDraft('planejamento estratégico')">Salvar alterações</button><button class="btn-green" onclick="approveStrategic()">Aprovar planejamento</button><button class="btn-yellow" onclick="requestAdjust('strategic')">Solicitar ajustes</button></div></div>`}
+function stageProduction(p,isAdmin){let items=p.production?.items||[];let blocked=!isAdmin&&p.productionStatus==='Bloqueado';return`<div class="stage ${blocked?'locked':''}"><div class="stage-head"><div><h2>02 Desenvolvimento Criativo</h2><p>${isAdmin?'Área liberada para a agência preparar antes da aprovação do cliente.':'Cards separados para roteiros, carrosséis e estáticos.'}</p></div>${statusPill(p.productionStatus)}</div>${isAdmin?stageControl('production',p.productionStatus):''}${blocked?'<p class="muted">Bloqueado até aprovação do planejamento.</p>':`${renderContentFilters('admin')}<div id="admin_content_empty" class="empty hidden">Nenhum conteúdo encontrado com esses filtros.</div><div class="content-actions"><button onclick="addContentItem('roteiro')">+ Adicionar roteiro</button><button onclick="addContentItem('carrossel')">+ Adicionar carrossel</button><button onclick="addContentItem('estatico')">+ Adicionar estático</button><button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento Criativo</button></div>${items.map(renderContentItem).join('')}<label>Observações gerais do desenvolvimento</label><textarea class="note" id="production_note" oninput="autoGrow(this)">${p.production?.note||''}</textarea><div class="actions"><button class="btn-dark" onclick="saveDraft('desenvolvimento criativo')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('production')">Liberar desenvolvimento ao cliente</button><button class="btn-dark" onclick="saveDraft('calendário editorial')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('calendar')">Liberar calendário ao cliente</button><button class="btn-yellow" onclick="requestAdjust('production')">Registrar ajustes</button></div>`}</div>`}
+function itemProgress(item){let total=item.checklist?.length||0,done=(item.checklist||[]).filter(x=>x.done).length;return total?Math.round(done*100/total):0}
+function renderContentItem(item){let pct=itemProgress(item),typeLabel=item.type==='roteiro'?'🎬 Roteiro':item.type==='carrossel'?'📚 Carrossel':'🖼️ Estático';return`<div class="content-item ${pct===100?'done':''}" data-item="${item.id}" data-filter-scope="admin" data-week="${item.week||''}" data-status="${item.itemStatus||''}" data-search="${htmlToText(Object.values(item.fields||{}).join(' ')+' '+(item.note||'')+' '+(item.responsible||'')).replace(/"/g,'&quot;')}"><div class="content-item-head"><div><h4>${typeLabel}</h4><span class="muted">${pct}% concluído</span></div><button class="btn-danger" onclick="removeContentItem('${item.id}')">Remover</button></div><div class="content-progress"><span style="width:${pct}%"></span></div><label>Responsável</label><textarea data-field="responsible" oninput="autoGrow(this)" placeholder="Ex: Diego, Luana, Lucas">${item.responsible||''}</textarea><label>Link Drive</label><textarea data-field="driveLink" oninput="autoGrow(this)" placeholder="Cole aqui o link do Drive">${item.driveLink||''}</textarea><label>Data de postagem</label><input type="date" data-field="postDate" value="${item.postDate||''}"><label>Semana do mês</label><select data-field="week"><option ${item.week==='Semana 1'?'selected':''}>Semana 1</option><option ${item.week==='Semana 2'?'selected':''}>Semana 2</option><option ${item.week==='Semana 3'?'selected':''}>Semana 3</option><option ${item.week==='Semana 4'?'selected':''}>Semana 4</option><option ${item.week==='Semana 5'?'selected':''}>Semana 5</option></select><label>Status do conteúdo</label><select data-field="itemStatus"><option ${item.itemStatus==='Em criação'?'selected':''}>Em criação</option><option ${item.itemStatus==='Aguardando aprovação'?'selected':''}>Aguardando aprovação</option><option ${item.itemStatus==='Aprovado'?'selected':''}>Aprovado</option><option ${item.itemStatus==='Ajustes'?'selected':''}>Ajustes</option><option ${item.itemStatus==='Postado'?'selected':''}>Postado</option></select><label>Tema</label><div class="rich-toolbar"><button type="button" onclick="formatText('bold')" title="Negrito">B</button><button type="button" onclick="formatText('foreColor','#5B56FF')" title="Letra roxa">Roxo</button><button type="button" onclick="formatText('foreColor','#1C1C1C')" title="Letra preta">Preto</button><button type="button" onclick="formatText('foreColor','#FFFFFF')" title="Letra branca">Branco</button><button type="button" onclick="formatHighlight()" title="Fundo preto com letra branca">Destaque</button><button type="button" onclick="clearFormat()" title="Remover formatação">Limpar</button></div><div class="rich-editor" onpaste="pasteClean(event)" data-field="tema" contenteditable="true">${item.fields?.tema||''}</div>${item.type==='roteiro'?`<label>Objetivo</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="objetivo" contenteditable="true">${item.fields?.objetivo||''}</div><label>Gancho</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="gancho" contenteditable="true">${item.fields?.gancho||''}</div><label>Desenvolvimento</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="desenvolvimento" contenteditable="true">${item.fields?.desenvolvimento||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}${item.type==='carrossel'?`<label>Objetivo</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="objetivo" contenteditable="true">${item.fields?.objetivo||''}</div><label>Slides</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="slides" contenteditable="true">${item.fields?.slides||''}</div><label>Legenda</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="legenda" contenteditable="true">${item.fields?.legenda||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}${item.type==='estatico'?`<label>Mensagem principal</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="mensagem" contenteditable="true">${item.fields?.mensagem||''}</div><label>Legenda</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="legenda" contenteditable="true">${item.fields?.legenda||''}</div><label>CTA</label><div class="rich-editor" onpaste="pasteClean(event)" data-field="cta" contenteditable="true">${item.fields?.cta||''}</div>`:''}<div class="checklist">${(item.checklist||[]).map((c,i)=>`<label class="checkline"><input type="checkbox" ${c.done?'checked':''} onchange="toggleChecklist('${item.id}',${i},this.checked)"> ${c.label}</label>`).join('')}</div><label>Observações</label><textarea data-field="note" oninput="autoGrow(this)">${item.note||''}</textarea></div>`}
+
+function formatDateBR(v){if(!v)return 'Sem data';const [y,m,d]=v.split('-');return `${d}/${m}/${y}`;}
+function itemFormatLabel(type){return type==='roteiro'?'🎬 Roteiro':type==='carrossel'?'📚 Carrossel':'🖼️ Estático';}
+function calendarItemsFromProduction(p){
+  const items=p.production?.items||[];
+  return items.map(item=>({
+    id:item.id,
+    date:item.postDate||'',
+    week:item.week||'',
+    format:itemFormatLabel(item.type),
+    theme:htmlToText(item.fields?.tema||'Sem tema'),
+    status:item.itemStatus||'Em criação', note:item.clientNote||''
+  })).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
+}
+function renderAutoCalendar(p,isAdmin){
+  const list=calendarItemsFromProduction(p);
+  if(!list.length)return '<div class="empty">Nenhum conteúdo com data no Desenvolvimento Criativo.</div>';
+  return `<div class="auto-calendar">
+    ${list.map(item=>`<div class="calendar-row">
+      <div><strong>${formatDateBR(item.date)}</strong><span>${item.week||''}</span></div>
+      <div><strong>${item.format}</strong><span>${item.theme}</span></div>
+      <div><span class="calendar-status ${item.status.replaceAll(' ','-').toLowerCase()}">${item.status}</span>${item.note?`<small class="calendar-note">${item.note}</small>`:''}</div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function stageCalendar(p,isAdmin){let blocked=!isAdmin&&p.calendarStatus==='Bloqueado';return`<div class="stage ${blocked?'locked':''}"><div class="stage-head"><div><h2>03 Calendário Editorial</h2><div class="actions no-print"><button class="btn-dark" onclick="printCalendar()">PDF Calendário Editorial</button></div><p>${isAdmin?'Área liberada para a agência preparar antes da liberação ao cliente.':'Organização de datas, formatos e temas.'}</p></div>${statusPill(p.calendarStatus)}</div>${isAdmin?stageControl('calendar',p.calendarStatus):''}${blocked?'<p class="muted">Bloqueado até aprovação do desenvolvimento.</p>':`<div class="content-box"><label>Calendário automático</label>${renderAutoCalendar(p,isAdmin)}</div>${field('Observações do calendário','calendar_content',p.calendar?.content,isAdmin)}<label>Observações do cliente</label><textarea class="note" id="calendar_note" oninput="autoGrow(this)">${p.calendar?.note||''}</textarea><div class="actions"><button class="btn-dark" onclick="saveDraft('calendário editorial')">Salvar alterações</button><button class="btn-green" onclick="releaseStage('calendar')">Liberar calendário ao cliente</button><button class="btn-green" onclick="releaseStage('approval')">Liberar aprovação final</button><button class="btn-yellow" onclick="requestAdjust('calendar')">Registrar ajustes</button></div>`}</div>`}
+function stageApproval(p,isAdmin){
+  let blocked=!isAdmin&&p.approvalStatus==='Bloqueado';
+  return `<div class="stage ${blocked?'locked':''}">
+    <div class="stage-head">
+      <div><h2>04 Aprovação Final</h2><p>${isAdmin?'Área liberada para a agência preparar antes de mostrar ao cliente.':'Conteúdos finais liberados para sua conferência.'}</p></div>
+      ${statusPill(p.approvalStatus)}
     </div>
-    ${c.access==='Bloqueado'?'<div class="empty">Acesso bloqueado temporariamente.</div>':`
-      <h2>Projetos</h2>
-      <div class="client-projects">${c.projects.map(x=>`
-        <div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}');renderClientPortal()">
-          <h3>${x.period}</h3>
-          <div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div>
-          <div class="progress"><span style="width:${progress(x)}%"></span></div>
-        </div>`).join('')}</div>
-      ${p?renderProjectDetail(c,p,false):'<div class="empty">Nenhum projeto disponível.</div>'}`}`;
+    ${blocked?'<p class="muted">Esta etapa ainda não foi liberada pela agência.</p>':`
+      <div class="content-box">
+        <label>Orientações finais</label>
+        ${isAdmin?`<div class="rich-toolbar"><button type="button" onclick="formatText('bold')" title="Negrito">B</button><button type="button" onclick="formatText('foreColor','#5B56FF')" title="Letra roxa">Roxo</button><button type="button" onclick="formatText('foreColor','#1C1C1C')" title="Letra preta">Preto</button><button type="button" onclick="formatText('foreColor','#FFFFFF')" title="Letra branca">Branco</button><button type="button" onclick="formatHighlight()" title="Fundo preto com letra branca">Destaque</button><button type="button" onclick="clearFormat()" title="Remover formatação">Limpar</button></div><div class="rich-editor" onpaste="pasteClean(event)" id="approval_notes" contenteditable="true">${p.approvalNotes||''}</div>`:`<div class="readonly-box">${p.approvalNotes||''}</div>`}
+      </div>
+      ${isAdmin?`<div class="actions"><button class="btn-green" onclick="releaseStage('approval')">Liberar aprovação final ao cliente</button></div>`:''}
+    `}
+  </div>`;
+}
+function collectProduction(p){let items=(p.production?.items||[]).map(item=>{let box=document.querySelector(`[data-item="${item.id}"]`);if(!box)return item;let fields={...item.fields};box.querySelectorAll('[data-field]').forEach(el=>{let k=el.getAttribute('data-field');if(k==='note') item.note=el.value; else if(k==='driveLink') item.driveLink=el.value; else if(k==='postDate') item.postDate=el.value; else if(k==='week') item.week=el.value; else if(k==='itemStatus') item.itemStatus=el.value; else if(k==='responsible') item.responsible=el.value; else fields[k]=(el.innerHTML!==undefined?el.innerHTML:el.value)});return{...item,fields,note:item.note||''}});return{...p.production,items,note:document.getElementById('production_note')?.value??p.production?.note??''}}
+function getForm(p){let g=id=>document.getElementById(id)?.value;return{strategic:{...p.strategic,macro:richValue('strategic_macro',p.strategic?.macro??''),editorial:richValue('strategic_editorial',p.strategic?.editorial??''),themes:richValue('strategic_themes',p.strategic?.themes??''),creative:richValue('strategic_creative',p.strategic?.creative??''),note:g('strategic_note')??p.strategic?.note??''},production:collectProduction(p),calendar:{...p.calendar,content:richValue('calendar_content',p.calendar?.content??''),note:g('calendar_note')??p.calendar?.note??''}}}
+async function saveProjectExtra(extra={}){
+  let p=currentProject();if(!p)return;
+  const approvalEl=document.getElementById('approval_notes');
+  const approvalNotes=approvalEl?approvalEl.innerHTML:(p.approvalNotes||'');
+  await updateDoc(doc(db,'hubProjects',p.id),{...getForm(p),approvalNotes,...extra,updatedAt:serverTimestamp()})
+}
+function addHistory(p,text){return[new Date().toLocaleString('pt-BR')+' • '+text,...(p.history||[])]}
+async function addContentItem(type){let p=currentProject();let form=getForm(p);form.production.items=[...(form.production.items||[]),newContentItem(type)];form.history=addHistory(p,'Equipe Humaniza adicionou um '+(type==='roteiro'?'roteiro':type==='carrossel'?'carrossel':'estático')+'.');await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,history:form.history||p.history,updatedAt:serverTimestamp()});await loadData()}
+async function removeContentItem(id){let p=currentProject();let form=getForm(p);form.production.items=(form.production.items||[]).filter(x=>x.id!==id);await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+async function toggleChecklist(id,index,checked){let p=currentProject();let form=getForm(p);let item=form.production.items.find(x=>x.id===id);if(item&&item.checklist[index])item.checklist[index].done=checked;await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+function send(c,msg){if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank')}
+
+async function saveDraft(label='alterações'){
+  const p=currentProject(); if(!p)return;
+  try{
+    await saveProjectExtra({history:addHistory(p,'Equipe Humaniza • Salvou '+label+'.')});
+    alert('Alterações salvas com sucesso.');
+    await loadData();
+  }catch(err){console.error(err);alert('Erro ao salvar: '+(err.message||err));}
+}
+async function updateClientControl(field,value){
+  const c=currentClient(); if(!c)return;
+  try{
+    await updateDoc(doc(db,'hubClients',c.id),{[field]:value,updatedAt:serverTimestamp()});
+    alert('Cliente atualizado com sucesso.'); await loadData();
+  }catch(err){console.error(err);alert('Erro ao atualizar cliente: '+(err.message||err));}
+}
+async function updateProjectControl(field,value){
+  const p=currentProject(); if(!p)return;
+  try{
+    await updateDoc(doc(db,'hubProjects',p.id),{
+      [field]:value,
+      history:addHistory(p,'Equipe Humaniza • Alterou '+field+' para '+value+'.'),
+      updatedAt:serverTimestamp()
+    });
+    alert('Projeto atualizado com sucesso.'); await loadData();
+  }catch(err){console.error(err);alert('Erro ao atualizar projeto: '+(err.message||err));}
+}
+async function updateStageControl(stage,value){
+  const p=currentProject(); if(!p)return;
+  const fields={strategic:'strategicStatus',production:'productionStatus',calendar:'calendarStatus',approval:'approvalStatus'};
+  const field=fields[stage]; if(!field)return;
+  try{
+    await updateDoc(doc(db,'hubProjects',p.id),{
+      [field]:value,
+      history:addHistory(p,'Equipe Humaniza • Alterou '+stage+' para '+value+'.'),
+      updatedAt:serverTimestamp()
+    });
+    alert('Etapa atualizada com sucesso.'); await loadData();
+  }catch(err){console.error(err);alert('Erro ao atualizar etapa: '+(err.message||err));}
+}
+function controlSelect(label,value,onchange,options){
+  return `<label class="control-field"><span>${label}</span><select onchange="${onchange}">
+    ${options.map(o=>`<option value="${o}" ${value===o?'selected':''}>${o}</option>`).join('')}
+  </select></label>`;
+}
+function adminControls(c,p){
+  return `<div class="admin-control-panel">
+    <div class="control-head">
+      <h3>Controle de acesso e status</h3>
+      <p>Você decide o que o cliente pode visualizar.</p>
+    </div>
+    <div class="control-grid">
+      ${controlSelect('Status do cliente',c.status||'Ativo',`updateClientControl('status',this.value)`,['Ativo','Pausado','Finalizado'])}
+      ${controlSelect('Acesso do cliente',c.access||'Liberado',`updateClientControl('access',this.value)`,['Liberado','Bloqueado'])}
+      ${controlSelect('Projeto',p.projectState||'Em andamento',`updateProjectControl('projectState',this.value)`,['Rascunho','Em andamento','Aguardando cliente','Aprovado','Finalizado','Bloqueado'])}
+      ${controlSelect('Visibilidade do projeto',p.projectAccess||'Liberado',`updateProjectControl('projectAccess',this.value)`,['Liberado','Bloqueado'])}
+    </div>
+  </div>`;
+}
+function stageControl(stage,value){
+  const opts=['Preparando','Liberado ao cliente','Aguardando aprovação','Aprovado','Finalizado','Bloqueado'];
+  return `<div class="stage-control">${controlSelect('Status da etapa',value||'Preparando',`updateStageControl('${stage}',this.value)`,opts)}</div>`;
 }
 
-function render(){
-  agencyMode.classList.toggle('hidden',mode!=='agency');
-  clientMode.classList.toggle('hidden',mode!=='client');
-  btnNewClient.style.display=mode==='agency'?'inline-block':'none';
-  btnNewProject.style.display=mode==='agency'?'inline-block':'none';
-
-  if(mode==='agency'){
-    renderDashboard();renderClients();renderWorkspace();
-  } else {
-    renderClientPortal();
+async function releaseStage(stage){
+  let p=currentProject();
+  if(!p)return;
+  const map={
+    production:{field:'productionStatus',status:'Em desenvolvimento',text:'Desenvolvimento liberado ao cliente.'},
+    calendar:{field:'calendarStatus',status:'Em desenvolvimento',text:'Calendário liberado ao cliente.'},
+    approval:{field:'approvalStatus',status:'Em andamento',text:'Aprovação final liberada ao cliente.'}
+  };
+  const cfg=map[stage];
+  if(!cfg)return;
+  try{
+    await saveProjectExtra({[cfg.field]:cfg.status,history:addHistory(p,'Equipe Humaniza • '+cfg.text)});
+    alert(cfg.text);
+    await loadData();
+  }catch(err){
+    console.error(err);
+    alert('Erro ao liberar etapa: '+(err.message||err));
   }
-  setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0);
 }
-
-// Abre direto no Portal Cliente quando o link tiver #cliente=ID
-if (location.hash.startsWith('#cliente=')) {
-  mode = 'client';
-  localStorage.setItem('hubMode', 'client');
-}
-
-window.addEventListener('hashchange', () => {
-  if (location.hash.startsWith('#cliente=')) {
-    mode = 'client';
-    localStorage.setItem('hubMode', 'client');
-  }
-  render();
-});
-
-render();
+async function approveStrategic(){let c=currentClient(),p=currentProject();await saveProjectExtra({strategicStatus:'Aprovado',productionStatus:'Em desenvolvimento',history:addHistory(p,'Planejamento aprovado. Desenvolvimento liberado.')});send(c,`✅ PLANEJAMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nA produção pode iniciar seguindo exatamente o planejamento aprovado.`);await loadData()}
+async function approveProduction(){let c=currentClient(),p=currentProject();await saveProjectExtra({productionStatus:'Aprovado',calendarStatus:'Em desenvolvimento',history:addHistory(p,'Desenvolvimento aprovado. Calendário liberado.')});send(c,`✅ DESENVOLVIMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nCalendário Editorial liberado.`);await loadData()}
+async function approveCalendar(){let c=currentClient(),p=currentProject();await saveProjectExtra({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.')});send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);await loadData()}
+async function requestAdjust(type){let c=currentClient(),p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};await saveProjectExtra({[map[type][0]]:'Ajustes solicitados',history:addHistory(p,'Ajustes solicitados em '+map[type][1]+'.')});send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
+async function deleteClient(id){if(!confirm('Excluir cliente e todos os projetos dele?'))return;for(let p of projects.filter(p=>p.clientId===id))await deleteDoc(doc(db,'hubProjects',p.id));await deleteDoc(doc(db,'hubClients',id));selectedClientId=null;selectedProjectId=null;await loadData()}
+function copyClientLink(){let c=currentClient();if(!c)return;let link=window.location.origin+'/cliente.html?id='+c.id;navigator.clipboard?.writeText(link);alert('Link do cliente copiado: '+link)}
+function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+startRealtime();
