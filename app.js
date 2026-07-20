@@ -1,6 +1,6 @@
 import { db, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp, onSnapshot } from "./firebase.js";
 
-let clients=[], projects=[], briefingQuestions=[], briefingAnswers=[], selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null, adminView=localStorage.getItem('hubAdminView')||'client';
+let clients=[], projects=[], briefingQuestions=[], briefingAnswers=[], editingClientId=null, selectedClientId=localStorage.getItem('hubSelectedClient')||null, selectedProjectId=localStorage.getItem('hubSelectedProject')||null, adminView=localStorage.getItem('hubAdminView')||'client';
 
 let realtimeReady=false;
 function showRealtimeNotice(){
@@ -60,7 +60,7 @@ function startRealtime(){
 }
 
 
-Object.assign(window,{openClientModal,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode,addBriefingQuestion,editBriefingQuestion,deleteBriefingQuestion,toggleBriefingQuestion,moveBriefingQuestion,releaseBriefingEdit,lockBriefingEdit,createRecommendedBriefingQuestions,showBriefingModel,showClientWorkspace,setBriefingStatus,duplicateBriefingQuestion,previewBriefing});
+Object.assign(window,{openClientModal,editClient,openProjectModal,closeModals,saveClient,saveProject,selectClient,selectProject,deleteClient,copyClientLink,copyBriefingLink,applyAdminContentFilters,clearAdminContentFilters,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,render,addContentItem,removeContentItem,toggleChecklist,formatText,formatHighlight,clearFormat,setTextSize,normalizeEditor,pasteClean,releaseStage,saveDraft,updateClientControl,updateProjectControl,updateStageControl,printDevelopment,printCalendar,printFullProject,setPrintMode,addBriefingQuestion,editBriefingQuestion,deleteBriefingQuestion,toggleBriefingQuestion,moveBriefingQuestion,releaseBriefingEdit,lockBriefingEdit,createRecommendedBriefingQuestions,showBriefingModel,showClientWorkspace,setBriefingStatus,duplicateBriefingQuestion,previewBriefing,toggleCollapse});
 
 function setPrintMode(mode){
   document.body.setAttribute('data-print-mode', mode);
@@ -179,15 +179,66 @@ function baseProject(period,clientId){return{clientId,period,strategicStatus:'Ag
 async function loadData(){clients=(await getDocs(collection(db,'hubClients'))).docs.map(d=>({id:d.id,...d.data()}));projects=(await getDocs(collection(db,'hubProjects'))).docs.map(d=>({id:d.id,...d.data()}));if(selectedClientId&&!clients.find(c=>c.id===selectedClientId))selectedClientId=clients[0]?.id||null;if(!selectedClientId&&clients[0])selectedClientId=clients[0].id;let ps=projects.filter(p=>p.clientId===selectedClientId);if(selectedProjectId&&!ps.find(p=>p.id===selectedProjectId))selectedProjectId=ps[0]?.id||null;if(!selectedProjectId&&ps[0])selectedProjectId=ps[0].id;localStorage.setItem('hubSelectedClient',selectedClientId||'');localStorage.setItem('hubSelectedProject',selectedProjectId||'');render()}
 function currentClient(){return clients.find(c=>c.id===selectedClientId)}
 function currentProject(){return projects.find(p=>p.id===selectedProjectId)}
-function openClientModal(){clientName.value='';clientEmail.value='';responsibleName.value='';responsiblePhone.value='';clientStatus.value='Ativo';clientAccess.value='Liberado';clientObs.value='';clientModal.classList.add('active')}
+function openClientModal(){
+  editingClientId=null;
+  document.getElementById('clientModalTitle').textContent='Novo cliente';
+  document.getElementById('clientSaveButton').textContent='Salvar cliente';
+  clientName.value='';clientEmail.value='';responsibleName.value='';responsiblePhone.value='';clientStatus.value='Ativo';clientAccess.value='Liberado';clientService.value='Não definido';clientServiceCustom.value='';clientObs.value='';toggleCustomServiceField();clientModal.classList.add('active')
+}
+function editClient(id){
+  const c=clients.find(x=>x.id===id);if(!c)return;
+  editingClientId=id;
+  document.getElementById('clientModalTitle').textContent='Editar cliente';
+  document.getElementById('clientSaveButton').textContent='Salvar alterações';
+  clientName.value=c.name||'';clientEmail.value=c.email||'';responsibleName.value=c.responsibleName||'';responsiblePhone.value=c.responsiblePhone||'';clientStatus.value=c.status||'Ativo';clientAccess.value=c.access||'Liberado';clientService.value=c.serviceType||'Não definido';clientServiceCustom.value=c.serviceCustom||'';clientObs.value=c.obs||'';toggleCustomServiceField();clientModal.classList.add('active')
+}
+function toggleCustomServiceField(){
+  const wrap=document.getElementById('clientServiceCustomWrap');
+  if(wrap)wrap.classList.toggle('hidden',document.getElementById('clientService')?.value!=='Personalizado');
+}
+window.toggleCustomServiceField=toggleCustomServiceField;
 function openProjectModal(){if(!clients.length){alert('Cadastre um cliente primeiro.');return}projectClient.innerHTML=clients.map(c=>`<option value="${c.id}" ${c.id===selectedClientId?'selected':''}>${c.name}</option>`).join('');updateCopyOptions();projectClient.onchange=updateCopyOptions;projectPeriod.value='';projectModal.classList.add('active')}
 function updateCopyOptions(){let list=projects.filter(p=>p.clientId===projectClient.value);projectCopy.innerHTML='<option value="">Começar em branco</option>'+list.map(p=>`<option value="${p.id}">Duplicar ${p.period}</option>`).join('')}
-async function saveClient(){let name=clientName.value.trim();if(!name){alert('Coloque o nome do cliente.');return}let r=await addDoc(collection(db,'hubClients'),{name,email:clientEmail.value.trim(),responsibleName:responsibleName.value.trim(),responsiblePhone:responsiblePhone.value.trim().replace(/\D/g,''),status:clientStatus.value,access:clientAccess.value,obs:clientObs.value.trim(),createdAt:serverTimestamp(),updatedAt:serverTimestamp()});selectedClientId=r.id;selectedProjectId=null;closeModals();await loadData()}
+async function saveClient(){
+  let name=clientName.value.trim();if(!name){alert('Coloque o nome do cliente.');return}
+  const payload={name,email:clientEmail.value.trim(),responsibleName:responsibleName.value.trim(),responsiblePhone:responsiblePhone.value.trim().replace(/\D/g,''),status:clientStatus.value,access:clientAccess.value,serviceType:clientService.value,serviceCustom:clientService.value==='Personalizado'?clientServiceCustom.value.trim():'',obs:clientObs.value.trim(),updatedAt:serverTimestamp()};
+  if(editingClientId){
+    await updateDoc(doc(db,'hubClients',editingClientId),payload);selectedClientId=editingClientId;
+  }else{
+    const r=await addDoc(collection(db,'hubClients'),{...payload,createdAt:serverTimestamp()});selectedClientId=r.id;selectedProjectId=null;
+  }
+  editingClientId=null;closeModals();await loadData()
+}
 async function saveProject(){let clientId=projectClient.value,period=projectPeriod.value.trim();if(!period){alert('Coloque o período.');return}let data,copyId=projectCopy.value;if(copyId){let old=projects.find(p=>p.id===copyId);data=JSON.parse(JSON.stringify(old));delete data.id;data.period=period;data.clientId=clientId;data.history=['Equipe Humaniza criou o projeto duplicando '+old.period+'.'];data.strategicStatus='Aguardando aprovação';data.productionStatus='Bloqueado';data.calendarStatus='Bloqueado';data.approvalStatus='Bloqueado'}else data=baseProject(period,clientId);data.createdAt=serverTimestamp();data.updatedAt=serverTimestamp();let r=await addDoc(collection(db,'hubProjects'),data);selectedClientId=clientId;selectedProjectId=r.id;closeModals();await loadData()}
 function selectClient(id){selectedClientId=id;selectedProjectId=projects.filter(p=>p.clientId===id)[0]?.id||null;localStorage.setItem('hubSelectedClient',id);localStorage.setItem('hubSelectedProject',selectedProjectId||'');render()}
 function selectProject(id){selectedProjectId=id;localStorage.setItem('hubSelectedProject',id);render()}
+function clientServiceLabel(c){
+  if(!c)return 'Não definido';
+  if(c.serviceType==='Personalizado')return c.serviceCustom||'Personalizado';
+  return c.serviceType||'Não definido';
+}
+function toggleCollapse(button){
+  const target=button?.closest('.collapsible-card');if(!target)return;
+  target.classList.toggle('collapsed');
+  button.setAttribute('aria-expanded',target.classList.contains('collapsed')?'false':'true');
+  button.textContent=target.classList.contains('collapsed')?'Abrir':'Recolher';
+}
+function enhanceCollapsibles(){
+  document.querySelectorAll('#workspace .stage, #workspace .content-item').forEach((el,index)=>{
+    if(el.dataset.collapseReady==='1')return;
+    el.dataset.collapseReady='1';el.classList.add('collapsible-card');
+    const head=el.querySelector(':scope > .stage-head, :scope > .content-item-head');
+    if(!head)return;
+    const body=document.createElement('div');body.className='collapsible-body';
+    [...el.children].filter(child=>child!==head).forEach(child=>body.appendChild(child));
+    el.appendChild(body);
+    const btn=document.createElement('button');btn.type='button';btn.className='btn-collapse no-print';btn.textContent=index<2?'Recolher':'Abrir';btn.setAttribute('aria-expanded',index<2?'true':'false');btn.onclick=()=>toggleCollapse(btn);
+    head.appendChild(btn);
+    if(index>=2)el.classList.add('collapsed');
+  });
+}
 function renderDashboard(){dashboard.innerHTML=`<div class="dashboard-card"><span class="muted">Clientes</span><strong>${clients.length}</strong></div><div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div><div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.strategicStatus!=='Aprovado').length}</strong></div><div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x)===100).length}</strong></div>`}
-function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clients.filter(c=>c.name.toLowerCase().includes(q));clientsList.innerHTML=list.length?list.map(c=>{let count=projects.filter(p=>p.clientId===c.id).length,first=projects.find(p=>p.clientId===c.id);return`<div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')"><h3>${c.name}</h3><div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>${count} projeto(s)</div><div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${first?statusPill(first.strategicStatus):''}</div></div>`}).join(''):'<div class="empty">Nenhum cliente.</div>'}
+function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clients.filter(c=>c.name.toLowerCase().includes(q));clientsList.innerHTML=list.length?list.map(c=>{let count=projects.filter(p=>p.clientId===c.id).length,first=projects.find(p=>p.clientId===c.id);return`<div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')"><h3>${c.name}</h3><div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>Serviço: ${escapeHtml(clientServiceLabel(c))}<br>${count} projeto(s)</div><div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${first?statusPill(first.strategicStatus):''}</div></div>`}).join(''):'<div class="empty">Nenhum cliente.</div>'}
 
 function normalizeFilterText(value){
   const div=document.createElement('div');
@@ -611,7 +662,7 @@ function copyBriefingLink(){
   alert('Link do briefing copiado: '+link);
 }
 
-function renderWorkspace(){if(adminView==='briefing-model'){workspace.innerHTML=renderBriefingModel();return}let c=currentClient();if(!c){workspace.innerHTML='<div class="panel"><div class="actions"><button class="btn-dark" onclick="showBriefingModel()">Modelo de Briefing</button></div><div class="empty">Cadastre ou selecione um cliente.</div></div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Acesso: ${c.access}</p></div><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div><div class="actions"><button class="btn-dark" onclick="showBriefingModel()">Modelo de Briefing</button><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button><button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
+function renderWorkspace(){if(adminView==='briefing-model'){workspace.innerHTML=renderBriefingModel();return}let c=currentClient();if(!c){workspace.innerHTML='<div class="panel"><div class="actions"><button class="btn-dark" onclick="showBriefingModel()">Modelo de Briefing</button></div><div class="empty">Cadastre ou selecione um cliente.</div></div>';return}let p=currentProject();workspace.innerHTML=`<div class="panel"><div class="top" style="margin:0"><div><h2>${c.name}</h2><p class="muted">Responsável: ${c.responsibleName||'Não definido'} • Serviço: ${escapeHtml(clientServiceLabel(c))} • Acesso: ${c.access}</p></div><div class="actions"><button class="btn-dark" onclick="editClient('${c.id}')">Editar cliente</button><button class="btn-danger" onclick="deleteClient('${c.id}')">Excluir cliente</button></div></div><div class="actions"><button class="btn-dark" onclick="showBriefingModel()">Modelo de Briefing</button><button onclick="openProjectModal()">+ Novo projeto/mês</button><button class="btn-dark" onclick="copyClientLink()">Copiar link do cliente</button><button class="btn-dark" onclick="copyBriefingLink()">Copiar link do briefing</button>
         <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
         <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
         <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button>
@@ -774,5 +825,5 @@ async function approveCalendar(){let c=currentClient(),p=currentProject();await 
 async function requestAdjust(type){let c=currentClient(),p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};await saveProjectExtra({[map[type][0]]:'Ajustes solicitados',history:addHistory(p,'Ajustes solicitados em '+map[type][1]+'.')});send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
 async function deleteClient(id){if(!confirm('Excluir cliente e todos os projetos dele?'))return;for(let p of projects.filter(p=>p.clientId===id))await deleteDoc(doc(db,'hubProjects',p.id));await deleteDoc(doc(db,'hubClients',id));selectedClientId=null;selectedProjectId=null;await loadData()}
 function copyClientLink(){let c=currentClient();if(!c)return;let link=window.location.origin+'/cliente.html?id='+c.id;navigator.clipboard?.writeText(link);alert('Link do cliente copiado: '+link)}
-function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+function render(){renderDashboard();renderClients();renderWorkspace();setTimeout(()=>{document.querySelectorAll('textarea').forEach(t=>autoGrow(t));enhanceCollapsibles();},0)}
 startRealtime();
