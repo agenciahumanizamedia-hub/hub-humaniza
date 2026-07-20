@@ -45,7 +45,7 @@
 
 <div class="modal" id="clientModal">
   <div class="modal-card">
-    <h2>Novo cliente</h2>
+    <h2 id="clientModalTitle">Novo cliente</h2>
     <div class="form">
       <div>
         <label>Cliente</label>
@@ -78,6 +78,21 @@
           <option>Bloqueado</option>
         </select>
       </div>
+      <div>
+        <label>Serviço contratado</label>
+        <select id="clientService" onchange="toggleCustomServiceField()">
+          <option>Não definido</option>
+          <option>Pacote completo</option>
+          <option>Somente captação</option>
+          <option>Somente gerenciamento</option>
+          <option>Captação + gerenciamento</option>
+          <option>Personalizado</option>
+        </select>
+      </div>
+      <div id="clientServiceCustomWrap" class="hidden">
+        <label>Descreva o serviço</label>
+        <input id="clientServiceCustom" placeholder="Ex: tráfego pago + 2 captações mensais">
+      </div>
       <div class="full">
         <label>Observação interna</label>
         <textarea id="clientObs" oninput="autoGrow(this)" placeholder="Observações sobre esse cliente..."></textarea>
@@ -85,7 +100,7 @@
     </div>
     <div class="actions">
       <button class="btn-dark" onclick="closeModals()">Cancelar</button>
-      <button onclick="saveClient()">Salvar cliente</button>
+      <button id="clientSaveButton" onclick="saveClient()">Salvar cliente</button>
     </div>
   </div>
 </div>
