@@ -339,3 +339,35 @@
     grid-template-columns:1fr;
   }
 }
+
+/* v1.5 edição de cliente e áreas recolhíveis */
+.btn-collapse{
+  margin-left:auto;
+  background:#343434;
+  border:1px solid #4a4a4a;
+  padding:8px 12px;
+  font-size:12px;
+  min-width:82px;
+}
+.collapsible-card>.collapsible-body{
+  display:block;
+}
+.collapsible-card.collapsed>.collapsible-body{
+  display:none;
+}
+.collapsible-card.collapsed{
+  padding-bottom:14px;
+}
+.collapsible-card.collapsed>.stage-head,
+.collapsible-card.collapsed>.content-item-head{
+  margin-bottom:0;
+}
+.content-item .btn-collapse{
+  background:#ecebff;
+  color:#1c1c1c;
+  border-color:#d7d5ff;
+}
+@media(max-width:720px){
+  .stage-head,.content-item-head{align-items:stretch}
+  .btn-collapse{width:100%;margin-left:0}
+}
