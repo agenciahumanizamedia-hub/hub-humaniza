@@ -218,77 +218,229 @@ function clientServiceLabel(c){
   return c.serviceType||'Não definido';
 }
 let preservedUiState=null;
-function uiStorageKey(){return 'hubUiState:'+(selectedClientId||'none')+':'+(selectedProjectId||'none');}
+
+function uiStorageKey(){
+  return 'hubUiState:v2:'+(adminView||'client')+':'+(selectedClientId||'none')+':'+(selectedProjectId||'none');
+}
+
+function readPersistedUiState(){
+  try{return JSON.parse(localStorage.getItem(uiStorageKey())||'null');}
+  catch(e){return null;}
+}
+
+function persistUiState(state){
+  if(!state)return;
+  preservedUiState=state;
+  try{localStorage.setItem(uiStorageKey(),JSON.stringify(state));}catch(e){}
+}
+
 function collapseKeyFor(el,index){
   if(el.dataset.item)return 'item:'+el.dataset.item;
   const title=(el.querySelector(':scope > .stage-head h2, :scope > .content-item-head h4, :scope > h2')?.textContent||('section-'+index)).trim();
   return 'section:'+title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-');
 }
-function captureUiState(){
-  const panels={};
-  document.querySelectorAll('#workspace .collapsible-card[data-collapse-key]').forEach(el=>{panels[el.dataset.collapseKey]=el.classList.contains('collapsed');});
+
+function findUiAnchor(){
+  const nodes=[...document.querySelectorAll('#workspace .collapsible-card[data-collapse-key]')];
+  if(!nodes.length)return {anchorKey:'',anchorOffset:null};
+
+  const headerBottom=document.querySelector('header')?.getBoundingClientRect().bottom||0;
+  let best=null;
+  let bestDistance=Infinity;
+
+  nodes.forEach(el=>{
+    const rect=el.getBoundingClientRect();
+    if(rect.bottom<=headerBottom)return;
+    const distance=Math.abs(rect.top-headerBottom);
+    if(distance<bestDistance){
+      bestDistance=distance;
+      best=el;
+    }
+  });
+
+  if(!best)best=nodes[0];
+  return {
+    anchorKey:best?.dataset?.collapseKey||'',
+    anchorOffset:best?best.getBoundingClientRect().top:null
+  };
+}
+
+function captureUiState(options={}){
+  const currentPanels=[...document.querySelectorAll('#workspace .collapsible-card[data-collapse-key]')];
+  const previous=readPersistedUiState()||{};
+  const panels={...(previous.panels||{})};
+
+  currentPanels.forEach(el=>{
+    panels[el.dataset.collapseKey]=el.classList.contains('collapsed');
+  });
+
   const active=document.activeElement;
-  preservedUiState={
+  const anchor=findUiAnchor();
+
+  const state={
     scrollY:window.scrollY,
     panels,
+    anchorKey:anchor.anchorKey||previous.anchorKey||'',
+    anchorOffset:anchor.anchorOffset!==null?anchor.anchorOffset:(previous.anchorOffset??null),
     focusId:active?.id||'',
     focusItem:active?.closest?.('[data-item]')?.dataset.item||'',
     focusField:active?.dataset?.field||'',
     selectionStart:typeof active?.selectionStart==='number'?active.selectionStart:null,
-    selectionEnd:typeof active?.selectionEnd==='number'?active.selectionEnd:null
+    selectionEnd:typeof active?.selectionEnd==='number'?active.selectionEnd:null,
+    pendingTargetItemId:options.pendingTargetItemId!==undefined?options.pendingTargetItemId:(previous.pendingTargetItemId||'')
   };
-  try{sessionStorage.setItem(uiStorageKey(),JSON.stringify(preservedUiState));}catch(e){}
-  return preservedUiState;
+
+  persistUiState(state);
+  return state;
 }
+
 function getSavedUiState(){
-  if(preservedUiState)return preservedUiState;
-  try{return JSON.parse(sessionStorage.getItem(uiStorageKey())||'null');}catch(e){return null;}
+  return preservedUiState||readPersistedUiState();
 }
+
+function applyCollapsedState(el,collapsed){
+  el.classList.toggle('collapsed',!!collapsed);
+  const btn=el.querySelector(':scope > .stage-head .btn-collapse, :scope > .content-item-head .btn-collapse');
+  if(btn){
+    btn.setAttribute('aria-expanded',collapsed?'false':'true');
+    btn.textContent=collapsed?'Abrir':'Recolher';
+  }
+}
+
 function restoreUiState(){
-  const state=getSavedUiState();if(!state)return;
+  const state=getSavedUiState();
+  if(!state)return;
+
   document.querySelectorAll('#workspace .collapsible-card[data-collapse-key]').forEach(el=>{
     if(Object.prototype.hasOwnProperty.call(state.panels||{},el.dataset.collapseKey)){
-      const collapsed=!!state.panels[el.dataset.collapseKey];
-      el.classList.toggle('collapsed',collapsed);
-      const btn=el.querySelector(':scope > .stage-head .btn-collapse, :scope > .content-item-head .btn-collapse');
-      if(btn){btn.setAttribute('aria-expanded',collapsed?'false':'true');btn.textContent=collapsed?'Abrir':'Recolher';}
+      applyCollapsedState(el,!!state.panels[el.dataset.collapseKey]);
     }
   });
+
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    window.scrollTo(0,Number(state.scrollY)||0);
+    let restoredByTarget=false;
+
+    if(state.pendingTargetItemId){
+      const newItem=document.querySelector(`[data-item="${state.pendingTargetItemId}"]`);
+      if(newItem){
+        applyCollapsedState(newItem,false);
+        const parentStage=newItem.closest('.stage.collapsible-card');
+        if(parentStage)applyCollapsedState(parentStage,false);
+
+        newItem.scrollIntoView({behavior:'auto',block:'center'});
+        restoredByTarget=true;
+
+        state.pendingTargetItemId='';
+        state.scrollY=window.scrollY;
+        const newAnchor=findUiAnchor();
+        state.anchorKey=newAnchor.anchorKey||state.anchorKey;
+        state.anchorOffset=newAnchor.anchorOffset!==null?newAnchor.anchorOffset:state.anchorOffset;
+        persistUiState(state);
+      }
+    }
+
+    if(!restoredByTarget){
+      const anchor=state.anchorKey
+        ?document.querySelector(`#workspace .collapsible-card[data-collapse-key="${CSS.escape(state.anchorKey)}"]`)
+        :null;
+
+      if(anchor&&state.anchorOffset!==null&&state.anchorOffset!==undefined){
+        const currentTop=anchor.getBoundingClientRect().top;
+        const delta=currentTop-Number(state.anchorOffset);
+        if(Math.abs(delta)>1)window.scrollBy(0,delta);
+      }else{
+        window.scrollTo(0,Number(state.scrollY)||0);
+      }
+    }
+
     let target=state.focusId?document.getElementById(state.focusId):null;
-    if(!target&&state.focusItem&&state.focusField){target=document.querySelector(`[data-item="${state.focusItem}"] [data-field="${state.focusField}"]`);}
+    if(!target&&state.focusItem&&state.focusField){
+      target=document.querySelector(`[data-item="${state.focusItem}"] [data-field="${state.focusField}"]`);
+    }
+
     if(target){
       target.focus({preventScroll:true});
-      if(typeof target.setSelectionRange==='function'&&state.selectionStart!==null){try{target.setSelectionRange(state.selectionStart,state.selectionEnd??state.selectionStart);}catch(e){}}
+      if(typeof target.setSelectionRange==='function'&&state.selectionStart!==null){
+        try{target.setSelectionRange(state.selectionStart,state.selectionEnd??state.selectionStart);}catch(e){}
+      }
     }
+
+    state.scrollY=window.scrollY;
+    persistUiState(state);
     preservedUiState=null;
   }));
 }
-function resetUiState(){preservedUiState=null;try{sessionStorage.removeItem(uiStorageKey());}catch(e){}}
-function toggleCollapse(button){
-  const target=button?.closest('.collapsible-card');if(!target)return;
-  target.classList.toggle('collapsed');
-  button.setAttribute('aria-expanded',target.classList.contains('collapsed')?'false':'true');
-  button.textContent=target.classList.contains('collapsed')?'Abrir':'Recolher';
-  captureUiState();
+
+function resetUiState(){
+  preservedUiState=null;
+  try{localStorage.removeItem(uiStorageKey());}catch(e){}
 }
+
+function toggleCollapse(button){
+  const target=button?.closest('.collapsible-card');
+  if(!target)return;
+
+  const beforeTop=button.getBoundingClientRect().top;
+  const collapsed=!target.classList.contains('collapsed');
+  applyCollapsedState(target,collapsed);
+
+  const state=captureUiState();
+  state.panels[target.dataset.collapseKey]=collapsed;
+  persistUiState(state);
+
+  requestAnimationFrame(()=>{
+    const afterTop=button.getBoundingClientRect().top;
+    const delta=afterTop-beforeTop;
+    if(Math.abs(delta)>1)window.scrollBy(0,delta);
+
+    const refreshed=captureUiState();
+    refreshed.panels[target.dataset.collapseKey]=collapsed;
+    persistUiState(refreshed);
+  });
+}
+
 function enhanceCollapsibles(){
+  const saved=getSavedUiState();
+
   document.querySelectorAll('#workspace .stage, #workspace .content-item').forEach((el,index)=>{
     if(el.dataset.collapseReady==='1')return;
-    el.dataset.collapseReady='1';el.classList.add('collapsible-card');
+
+    el.dataset.collapseReady='1';
+    el.classList.add('collapsible-card');
     el.dataset.collapseKey=collapseKeyFor(el,index);
+
     const head=el.querySelector(':scope > .stage-head, :scope > .content-item-head');
     if(!head)return;
-    const body=document.createElement('div');body.className='collapsible-body';
+
+    const body=document.createElement('div');
+    body.className='collapsible-body';
     [...el.children].filter(child=>child!==head).forEach(child=>body.appendChild(child));
     el.appendChild(body);
-    const btn=document.createElement('button');btn.type='button';btn.className='btn-collapse no-print';btn.textContent=index<2?'Recolher':'Abrir';btn.setAttribute('aria-expanded',index<2?'true':'false');btn.onclick=()=>toggleCollapse(btn);
+
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='btn-collapse no-print';
+    btn.onclick=()=>toggleCollapse(btn);
     head.appendChild(btn);
-    if(index>=2)el.classList.add('collapsed');
+
+    const hasSaved=Object.prototype.hasOwnProperty.call(saved?.panels||{},el.dataset.collapseKey);
+    const defaultCollapsed=index>=2;
+    const collapsed=hasSaved?!!saved.panels[el.dataset.collapseKey]:defaultCollapsed;
+    applyCollapsedState(el,collapsed);
   });
+
   restoreUiState();
 }
+
+function refreshWorkspacePreservingUi(){
+  captureUiState();
+  renderWorkspace();
+  setTimeout(()=>{
+    document.querySelectorAll('textarea').forEach(t=>autoGrow(t));
+    enhanceCollapsibles();
+  },0);
+}
+
 function renderDashboard(){dashboard.innerHTML=`<div class="dashboard-card"><span class="muted">Clientes</span><strong>${clients.length}</strong></div><div class="dashboard-card"><span class="muted">Projetos</span><strong>${projects.length}</strong></div><div class="dashboard-card"><span class="muted">Aguardando</span><strong>${projects.filter(x=>x.strategicStatus!=='Aprovado').length}</strong></div><div class="dashboard-card"><span class="muted">Finalizados</span><strong>${projects.filter(x=>progress(x)===100).length}</strong></div>`}
 function renderClients(){let q=(searchClient.value||'').toLowerCase(),list=clients.filter(c=>c.name.toLowerCase().includes(q));clientsList.innerHTML=list.length?list.map(c=>{let count=projects.filter(p=>p.clientId===c.id).length,first=projects.find(p=>p.clientId===c.id);return`<div class="client-card ${c.id===selectedClientId?'active':''}" onclick="selectClient('${c.id}')"><h3>${c.name}</h3><div class="muted">Resp.: ${c.responsibleName||'Não definido'}<br>Serviço: ${escapeHtml(clientServiceLabel(c))}<br>${count} projeto(s)</div><div class="pills"><span class="pill">${c.status}</span><span class="pill">${c.access}</span>${first?statusPill(first.strategicStatus):''}</div></div>`}).join(''):'<div class="empty">Nenhum cliente.</div>'}
 
@@ -527,7 +679,7 @@ async function setBriefingStatus(status){
   await updateDoc(doc(db,'hubClients',c.id),{briefingStatus:status,briefingEditAllowed:status==='Liberado',updatedAt:serverTimestamp()});
   c.briefingStatus=status;
   c.briefingEditAllowed=status==='Liberado';
-  renderWorkspace();
+  refreshWorkspacePreservingUi();
   alert(status==='Liberado'?'Briefing liberado para o cliente responder.':status==='Bloqueado'?'Briefing bloqueado para o cliente.':'Briefing mantido em edição administrativa.');
 }
 
@@ -536,7 +688,7 @@ async function duplicateBriefingQuestion(id){
   const maxOrder=Math.max(0,...briefingQuestions.map(x=>Number(x.order)||0));
   const ref=await addDoc(collection(db,'hubBriefingQuestions'),{text:q.text+' (cópia)',description:q.description||'',category:q.category||'Geral',type:q.type||'textarea',required:q.required!==false,active:q.active!==false,clientId:q.clientId||null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
   briefingQuestions.push({...q,id:ref.id,text:q.text+' (cópia)',order:maxOrder+1});
-  renderWorkspace();
+  refreshWorkspacePreservingUi();
 }
 
 async function addBriefingQuestion(fromModel=false){
@@ -549,7 +701,7 @@ async function addBriefingQuestion(fromModel=false){
   const required=confirm('Essa pergunta será obrigatória?');
   const onlyClient=!!c&&confirm('Esta pergunta deve aparecer somente para o cliente selecionado?');
   const maxOrder=Math.max(0,...briefingQuestions.map(q=>Number(q.order)||0));
-  const payload={text:text.trim(),description:description.trim(),category:category.trim()||'Geral',type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,active:true,clientId:onlyClient&&c?c.id:null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()}; const ref=await addDoc(collection(db,'hubBriefingQuestions'),payload); briefingQuestions.push({...payload,id:ref.id}); renderWorkspace();
+  const payload={text:text.trim(),description:description.trim(),category:category.trim()||'Geral',type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,active:true,clientId:onlyClient&&c?c.id:null,order:maxOrder+1,createdAt:serverTimestamp(),updatedAt:serverTimestamp()}; const ref=await addDoc(collection(db,'hubBriefingQuestions'),payload); briefingQuestions.push({...payload,id:ref.id}); refreshWorkspacePreservingUi();
 }
 async function editBriefingQuestion(id){
   const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
@@ -558,15 +710,15 @@ async function editBriefingQuestion(id){
   const category=prompt('Edite a categoria:',q.category||'Geral')||'Geral';
   const type=(prompt('Tipo: text, textarea, number, date, url ou yesno',q.type||'textarea')||q.type||'textarea').toLowerCase();
   const required=confirm('Clique em OK para obrigatória ou Cancelar para opcional.');
-  const changes={text:text.trim(),description:description.trim(),category:category.trim()||'Geral',type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,updatedAt:serverTimestamp()}; await updateDoc(doc(db,'hubBriefingQuestions',id),changes); Object.assign(q,changes); renderWorkspace();
+  const changes={text:text.trim(),description:description.trim(),category:category.trim()||'Geral',type:['text','textarea','number','date','url','yesno'].includes(type)?type:'textarea',required,updatedAt:serverTimestamp()}; await updateDoc(doc(db,'hubBriefingQuestions',id),changes); Object.assign(q,changes); refreshWorkspacePreservingUi();
 }
 async function deleteBriefingQuestion(id){
   if(!confirm('Excluir esta pergunta? As respostas antigas continuarão preservadas no histórico.'))return;
-  await deleteDoc(doc(db,'hubBriefingQuestions',id)); briefingQuestions=briefingQuestions.filter(q=>q.id!==id); renderWorkspace();
+  await deleteDoc(doc(db,'hubBriefingQuestions',id)); briefingQuestions=briefingQuestions.filter(q=>q.id!==id); refreshWorkspacePreservingUi();
 }
 async function toggleBriefingQuestion(id){
   const q=briefingQuestions.find(x=>x.id===id); if(!q)return;
-  const active=q.active===false; await updateDoc(doc(db,'hubBriefingQuestions',id),{active,updatedAt:serverTimestamp()}); q.active=active; renderWorkspace();
+  const active=q.active===false; await updateDoc(doc(db,'hubBriefingQuestions',id),{active,updatedAt:serverTimestamp()}); q.active=active; refreshWorkspacePreservingUi();
 }
 async function moveBriefingQuestion(id,direction){
   const ordered=[...briefingQuestions].sort((a,b)=>(a.order||0)-(b.order||0));
@@ -681,7 +833,7 @@ async function createRecommendedBriefingQuestions(){
 
     if(!pending.length){
       alert('Todas as perguntas deste modelo já estão cadastradas.');
-      renderWorkspace();
+      refreshWorkspacePreservingUi();
       return;
     }
 
@@ -693,7 +845,7 @@ async function createRecommendedBriefingQuestions(){
     const knownIds=new Set(briefingQuestions.map(q=>q.id));
     created.forEach(q=>{if(!knownIds.has(q.id))briefingQuestions.push(q);});
     briefingQuestions.sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
-    renderWorkspace();
+    refreshWorkspacePreservingUi();
     alert(created.length+' perguntas estratégicas importadas e exibidas abaixo.');
   }catch(err){
     console.error('Erro ao importar briefing:',err);
@@ -784,12 +936,38 @@ async function saveProjectExtra(extra={}){
   await updateDoc(doc(db,'hubProjects',p.id),{...getForm(p),approvalNotes,...extra,updatedAt:serverTimestamp()})
 }
 function addHistory(p,text){return[new Date().toLocaleString('pt-BR')+' • '+text,...(p.history||[])]}
-async function addContentItem(type){let p=currentProject();let form=getForm(p);form.production.items=[...(form.production.items||[]),newContentItem(type)];form.history=addHistory(p,'Equipe Humaniza adicionou um '+(type==='roteiro'?'roteiro':type==='carrossel'?'carrossel':'estático')+'.');await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,history:form.history||p.history,updatedAt:serverTimestamp()});await loadData()}
-async function removeContentItem(id){let p=currentProject();let form=getForm(p);form.production.items=(form.production.items||[]).filter(x=>x.id!==id);await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
-async function toggleChecklist(id,index,checked){let p=currentProject();let form=getForm(p);let item=form.production.items.find(x=>x.id===id);if(item&&item.checklist[index])item.checklist[index].done=checked;await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+async function addContentItem(type){
+  let p=currentProject();
+  if(!p)return;
+
+  const newItem=newContentItem(type);
+  const state=captureUiState({pendingTargetItemId:newItem.id});
+
+  const developmentStage=document.querySelector('#workspace .content-actions')?.closest('.collapsible-card');
+  if(developmentStage?.dataset?.collapseKey){
+    state.panels[developmentStage.dataset.collapseKey]=false;
+  }
+  state.panels['item:'+newItem.id]=false;
+  persistUiState(state);
+
+  let form=getForm(p);
+  form.production.items=[...(form.production.items||[]),newItem];
+  form.history=addHistory(p,'Equipe Humaniza adicionou um '+(type==='roteiro'?'roteiro':type==='carrossel'?'carrossel':'estático')+'.');
+
+  await updateDoc(doc(db,'hubProjects',p.id),{
+    production:form.production,
+    history:form.history||p.history,
+    updatedAt:serverTimestamp()
+  });
+
+  await loadData();
+}
+async function removeContentItem(id){captureUiState();let p=currentProject();let form=getForm(p);form.production.items=(form.production.items||[]).filter(x=>x.id!==id);await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
+async function toggleChecklist(id,index,checked){captureUiState();let p=currentProject();let form=getForm(p);let item=form.production.items.find(x=>x.id===id);if(item&&item.checklist[index])item.checklist[index].done=checked;await updateDoc(doc(db,'hubProjects',p.id),{production:form.production,updatedAt:serverTimestamp()});await loadData()}
 function send(c,msg){if(!c.responsiblePhone){alert('WhatsApp do responsável não cadastrado.');return}window.open(`https://wa.me/${c.responsiblePhone}?text=${encodeURIComponent(msg)}`,'_blank')}
 
 async function saveDraft(label='alterações'){
+  captureUiState();
   const p=currentProject(); if(!p)return;
   try{
     await saveProjectExtra({history:addHistory(p,'Equipe Humaniza • Salvou '+label+'.')});
@@ -798,6 +976,7 @@ async function saveDraft(label='alterações'){
   }catch(err){console.error(err);alert('Erro ao salvar: '+(err.message||err));}
 }
 async function updateClientControl(field,value){
+  captureUiState();
   const c=currentClient(); if(!c)return;
   try{
     await updateDoc(doc(db,'hubClients',c.id),{[field]:value,updatedAt:serverTimestamp()});
@@ -805,6 +984,7 @@ async function updateClientControl(field,value){
   }catch(err){console.error(err);alert('Erro ao atualizar cliente: '+(err.message||err));}
 }
 async function updateProjectControl(field,value){
+  captureUiState();
   const p=currentProject(); if(!p)return;
   try{
     await updateDoc(doc(db,'hubProjects',p.id),{
@@ -816,6 +996,7 @@ async function updateProjectControl(field,value){
   }catch(err){console.error(err);alert('Erro ao atualizar projeto: '+(err.message||err));}
 }
 async function updateStageControl(stage,value){
+  captureUiState();
   const p=currentProject(); if(!p)return;
   const fields={strategic:'strategicStatus',production:'productionStatus',calendar:'calendarStatus',approval:'approvalStatus'};
   const field=fields[stage]; if(!field)return;
@@ -853,6 +1034,7 @@ function stageControl(stage,value){
 }
 
 async function releaseStage(stage){
+  captureUiState();
   let p=currentProject();
   if(!p)return;
   const map={
@@ -871,11 +1053,20 @@ async function releaseStage(stage){
     alert('Erro ao liberar etapa: '+(err.message||err));
   }
 }
-async function approveStrategic(){let c=currentClient(),p=currentProject();await saveProjectExtra({strategicStatus:'Aprovado',productionStatus:'Em desenvolvimento',history:addHistory(p,'Planejamento aprovado. Desenvolvimento liberado.')});send(c,`✅ PLANEJAMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nA produção pode iniciar seguindo exatamente o planejamento aprovado.`);await loadData()}
-async function approveProduction(){let c=currentClient(),p=currentProject();await saveProjectExtra({productionStatus:'Aprovado',calendarStatus:'Em desenvolvimento',history:addHistory(p,'Desenvolvimento aprovado. Calendário liberado.')});send(c,`✅ DESENVOLVIMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nCalendário Editorial liberado.`);await loadData()}
-async function approveCalendar(){let c=currentClient(),p=currentProject();await saveProjectExtra({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.')});send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);await loadData()}
-async function requestAdjust(type){let c=currentClient(),p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};await saveProjectExtra({[map[type][0]]:'Ajustes solicitados',history:addHistory(p,'Ajustes solicitados em '+map[type][1]+'.')});send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
+async function approveStrategic(){captureUiState();let c=currentClient(),p=currentProject();await saveProjectExtra({strategicStatus:'Aprovado',productionStatus:'Em desenvolvimento',history:addHistory(p,'Planejamento aprovado. Desenvolvimento liberado.')});send(c,`✅ PLANEJAMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nA produção pode iniciar seguindo exatamente o planejamento aprovado.`);await loadData()}
+async function approveProduction(){captureUiState();let c=currentClient(),p=currentProject();await saveProjectExtra({productionStatus:'Aprovado',calendarStatus:'Em desenvolvimento',history:addHistory(p,'Desenvolvimento aprovado. Calendário liberado.')});send(c,`✅ DESENVOLVIMENTO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nCalendário Editorial liberado.`);await loadData()}
+async function approveCalendar(){captureUiState();let c=currentClient(),p=currentProject();await saveProjectExtra({calendarStatus:'Aprovado',approvalStatus:'Em andamento',history:addHistory(p,'Calendário aprovado. Próxima etapa: aprovação de artes e vídeos.')});send(c,`✅ CALENDÁRIO APROVADO\n\nCliente: ${c.name}\nProjeto: ${p.period}\n\nPróxima etapa: aprovação de artes e vídeos.`);await loadData()}
+async function requestAdjust(type){captureUiState();let c=currentClient(),p=currentProject(),map={strategic:['strategicStatus','Planejamento'],production:['productionStatus','Desenvolvimento'],calendar:['calendarStatus','Calendário']};await saveProjectExtra({[map[type][0]]:'Ajustes solicitados',history:addHistory(p,'Ajustes solicitados em '+map[type][1]+'.')});send(c,`⚠️ AJUSTES SOLICITADOS\n\nCliente: ${c.name}\nProjeto: ${p.period}\nEtapa: ${map[type][1]}`);await loadData()}
 async function deleteClient(id){if(!confirm('Excluir cliente e todos os projetos dele?'))return;for(let p of projects.filter(p=>p.clientId===id))await deleteDoc(doc(db,'hubProjects',p.id));await deleteDoc(doc(db,'hubClients',id));selectedClientId=null;selectedProjectId=null;await loadData()}
 function copyClientLink(){let c=currentClient();if(!c)return;let link=window.location.origin+'/cliente.html?id='+c.id;navigator.clipboard?.writeText(link);alert('Link do cliente copiado: '+link)}
-function render(){captureUiState();renderDashboard();renderClients();renderWorkspace();setTimeout(()=>{document.querySelectorAll('textarea').forEach(t=>autoGrow(t));enhanceCollapsibles();},0)}
+function render(){
+  if(document.querySelector('#workspace .collapsible-card[data-collapse-key]'))captureUiState();
+  renderDashboard();
+  renderClients();
+  renderWorkspace();
+  setTimeout(()=>{
+    document.querySelectorAll('textarea').forEach(t=>autoGrow(t));
+    enhanceCollapsibles();
+  },0);
+}
 startRealtime();
