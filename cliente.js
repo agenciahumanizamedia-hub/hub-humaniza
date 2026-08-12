@@ -230,6 +230,15 @@ function clearClientContentFilters(){
 function escapeHtml(value){
   return String(value??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
 }
+function safeExternalUrl(value){
+  const raw=String(value||'').trim();
+  if(!raw)return '';
+  const url=/^https?:\/\//i.test(raw)?raw:'https://'+raw.replace(/^\/\//,'');
+  try{
+    const parsed=new URL(url);
+    return ['http:','https:'].includes(parsed.protocol)?parsed.href:'';
+  }catch(e){return '';}
+}
 function availableBriefingQuestions(){
   return briefingQuestions.filter(q=>q.active!==false&&(!q.clientId||q.clientId===selectedClientId)).sort((a,b)=>(a.order||0)-(b.order||0));
 }
@@ -328,7 +337,7 @@ function renderContentItem(item){
     ${item.week?field('Semana do mês','week',item.week):''}
     ${item.itemStatus?field('Status do conteúdo','itemStatus',item.itemStatus):''}
 
-    ${item.driveLink?`<div class="content-box"><label>Link Drive</label><div class="readonly-box"><a href="${item.driveLink}" target="_blank" rel="noopener">Abrir Drive</a></div></div>`:''}
+    ${safeExternalUrl(item.driveLink)?`<div class="content-box"><label>Link do Drive</label><div class="readonly-box"><a href="${escapeHtml(safeExternalUrl(item.driveLink))}" target="_blank" rel="noopener noreferrer">Abrir Drive</a></div></div>`:''}
 
     ${field('Tema','tema',item.fields?.tema)}
 
