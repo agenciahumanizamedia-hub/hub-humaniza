@@ -28,6 +28,7 @@ function showRealtimeNotice(){
   window.__rtNotice=setTimeout(()=>n.classList.remove('show'),1800);
 }
 function applyClientRealtime(newClient,newProjects){
+  if(document.querySelector('#clientPortal .collapsible-card[data-collapse-key]'))captureClientUiState();
   client=newClient;
   projects=newProjects;
   if(selectedProjectId&&!projects.find(p=>p.id===selectedProjectId))selectedProjectId=projects[0]?.id||null;
@@ -74,10 +75,66 @@ function startClientRealtime(){
   },err=>console.error('Erro ao carregar respostas do briefing:',err));
 }
 
-Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects,printDevelopment,printCalendar,printFullProject,approveCreativeItem,requestCreativeAdjust,applyClientContentFilters,clearClientContentFilters,saveBriefing});
+Object.assign(window,{selectProject,approveStrategic,approveProduction,approveCalendar,requestAdjust,autoGrow,goToProjects,printDevelopment,printCalendar,printFullProject,approveCreativeItem,requestCreativeAdjust,applyClientContentFilters,clearClientContentFilters,saveBriefing,toggleClientCollapse});
 
 function autoGrow(el){el.style.height='auto';el.style.height=(el.scrollHeight+2)+'px'}
 function goToProjects(){document.getElementById('projectNav')?.scrollIntoView({behavior:'smooth',block:'start'})}
+function clientUiStorageKey(){return 'hubClientUi:v1:'+(selectedClientId||'none')+':'+(selectedProjectId||'none');}
+function readClientUiState(){try{return JSON.parse(localStorage.getItem(clientUiStorageKey())||'null')||{};}catch(e){return {};}}
+function saveClientUiState(state){try{localStorage.setItem(clientUiStorageKey(),JSON.stringify(state||{}));}catch(e){}}
+function clientCollapseKey(el,index){
+  if(el.dataset.item)return 'item:'+el.dataset.item;
+  const title=(el.querySelector(':scope > .stage-head h2, :scope > .content-item-head h4, :scope > h2')?.textContent||('section-'+index)).trim();
+  return 'section:'+title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-');
+}
+function captureClientUiState(){
+  const previous=readClientUiState();
+  const panels={...(previous.panels||{})};
+  document.querySelectorAll('#clientPortal .collapsible-card[data-collapse-key]').forEach(el=>{panels[el.dataset.collapseKey]=el.classList.contains('collapsed');});
+  const state={...previous,panels,scrollY:window.scrollY};
+  saveClientUiState(state);
+  return state;
+}
+function applyClientCollapsedState(el,collapsed){
+  el.classList.toggle('collapsed',!!collapsed);
+  const btn=el.querySelector(':scope > .stage-head .btn-collapse, :scope > .content-item-head .btn-collapse');
+  if(btn){btn.setAttribute('aria-expanded',collapsed?'false':'true');btn.textContent=collapsed?'Abrir':'Recolher';}
+}
+function toggleClientCollapse(button){
+  const target=button?.closest('.collapsible-card');if(!target)return;
+  const beforeTop=button.getBoundingClientRect().top;
+  const collapsed=!target.classList.contains('collapsed');
+  applyClientCollapsedState(target,collapsed);
+  const state=captureClientUiState();
+  state.panels[target.dataset.collapseKey]=collapsed;
+  saveClientUiState(state);
+  requestAnimationFrame(()=>{
+    const afterTop=button.getBoundingClientRect().top;
+    const delta=afterTop-beforeTop;
+    if(Math.abs(delta)>1)window.scrollBy(0,delta);
+    const refreshed=captureClientUiState();
+    refreshed.panels[target.dataset.collapseKey]=collapsed;
+    saveClientUiState(refreshed);
+  });
+}
+function enhanceClientCollapsibles(){
+  const saved=readClientUiState();
+  document.querySelectorAll('#clientPortal .stage, #clientPortal .content-item').forEach((el,index)=>{
+    if(el.dataset.collapseReady==='1')return;
+    const head=el.querySelector(':scope > .stage-head, :scope > .content-item-head');
+    if(!head)return;
+    el.dataset.collapseReady='1';
+    el.classList.add('collapsible-card');
+    el.dataset.collapseKey=clientCollapseKey(el,index);
+    const body=document.createElement('div');body.className='collapsible-body';
+    [...el.children].filter(child=>child!==head).forEach(child=>body.appendChild(child));
+    el.appendChild(body);
+    const btn=document.createElement('button');btn.type='button';btn.className='btn-collapse no-print btn-dark';btn.onclick=()=>toggleClientCollapse(btn);head.appendChild(btn);
+    const hasSaved=Object.prototype.hasOwnProperty.call(saved.panels||{},el.dataset.collapseKey);
+    applyClientCollapsedState(el,hasSaved?!!saved.panels[el.dataset.collapseKey]:false);
+  });
+  requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,Number(saved.scrollY)||window.scrollY)));
+}
 function formatDateBR(v){if(!v)return '';const [y,m,d]=v.split('-');return `${d}/${m}/${y}`;}
 function statusPill(s){if(s==='Aprovado')return'<span class="pill green">Aprovado</span>';if(s==='Ajustes solicitados')return'<span class="pill yellow">Ajustes</span>';if(s==='Bloqueado')return'<span class="pill lock">Bloqueado</span>';if(s==='Em andamento'||s==='Em desenvolvimento')return'<span class="pill purple">'+s+'</span>';return'<span class="pill yellow">'+s+'</span>'}
 function progress(p){let n=0;if(p.strategicStatus==='Aprovado')n+=25;if(p.productionStatus==='Aprovado')n+=25;if(p.calendarStatus==='Aprovado')n+=25;if(p.approvalStatus==='Finalizado')n+=25;return n}
@@ -317,19 +374,27 @@ async function saveBriefing(){
   alert('Briefing enviado com sucesso. A edição foi bloqueada.');
 }
 
+
+function renderAdjustmentAlert(item){
+  const requested=item?.clientApproval==='Ajustes solicitados'||item?.itemStatus==='Ajustes';
+  const note=String(item?.clientNote||'').trim();
+  if(!requested)return '';
+  const summary=note.length>140?note.slice(0,137)+'...':note;
+  return `<div class="pills" style="margin-top:8px"><span class="pill" style="color:#ff7b7b;border-color:rgba(255,90,90,.45);font-weight:900">⚠ Ajuste solicitado</span>${summary?`<span style="color:#ffb3b3;font-size:12px;font-weight:800;line-height:1.35">${escapeHtml(summary)}</span>`:''}</div>`;
+}
+
 function renderContentItem(item){
   let pct=itemProgress(item);
   const approval = item.clientApproval || 'Aguardando resposta';
   const approvalClass = approval === 'Aprovado' ? 'green' : approval === 'Ajustes solicitados' ? 'yellow' : 'purple';
 
-  return `<div class="content-item ${pct===100?'done':''}" data-item="${item.id}" data-filter-scope="client" data-week="${item.week||''}" data-status="${item.itemStatus||''}" data-search="${normalizeClientFilterText(Object.values(item.fields||{}).join(' ')+' '+(item.note||'')).replace(/"/g,'&quot;')}">
+  return `<div class="content-item ${pct===100?'done':''}" data-item="${item.id}" data-filter-scope="client" data-week="${item.week||''}" data-status="${item.itemStatus||''}" data-search="${normalizeClientFilterText(Object.values(item.fields||{}).join(' ')+' '+(item.note||'')+' '+(item.clientNote||'')+' '+(item.referenceLink||'')).replace(/"/g,'&quot;')}">
     <div class="content-item-head">
       <div>
         <h4>${contentTypeName(item.type)}</h4>
         <span class="muted">Status interno: ${pct}% concluído</span>
-        ${(item.note||item.clientNote)?`<div class="pills">${item.note?'<span class="pill yellow">⚠ Observação</span>':''}${item.clientNote?'<span class="pill yellow">⚠ Ajuste registrado</span>':''}</div>`:''}
       </div>
-      <div class="pills"><span class="pill ${approvalClass}">${approval}</span></div>
+      <div class="pills"><span class="pill ${approvalClass}">${approval}</span></div>${renderAdjustmentAlert(item)}
     </div>
 
     <div class="content-progress"><span style="width:${pct}%"></span></div>
@@ -339,14 +404,13 @@ function renderContentItem(item){
     ${item.itemStatus?field('Status do conteúdo','itemStatus',item.itemStatus):''}
 
     ${safeExternalUrl(item.driveLink)?`<div class="content-box"><label>Link do Drive</label><div class="readonly-box"><a href="${escapeHtml(safeExternalUrl(item.driveLink))}" target="_blank" rel="noopener noreferrer">Abrir Drive</a></div></div>`:''}
-    ${safeExternalUrl(item.referenceLink)?`<div class="content-box"><label>Referência do conteúdo</label><div class="readonly-box"><a href="${escapeHtml(safeExternalUrl(item.referenceLink))}" target="_blank" rel="noopener noreferrer">Abrir referência</a></div></div>`:''}
+    ${safeExternalUrl(item.referenceLink)?`<div class="content-box"><label>Link de referência</label><div class="readonly-box"><a href="${escapeHtml(safeExternalUrl(item.referenceLink))}" target="_blank" rel="noopener noreferrer">Abrir referência</a></div></div>`:''}
 
     ${field('Tema','tema',item.fields?.tema)}
 
     ${item.type==='roteiro'?`${field('Objetivo','objetivo',item.fields?.objetivo)}${field('Gancho','gancho',item.fields?.gancho)}${field('Desenvolvimento','desenvolvimento',item.fields?.desenvolvimento)}${field('CTA','cta',item.fields?.cta)}`:''}
     ${item.type==='carrossel'?`${field('Objetivo','objetivo',item.fields?.objetivo)}${field('Slides','slides',item.fields?.slides)}${field('Legenda','legenda',item.fields?.legenda)}${field('CTA','cta',item.fields?.cta)}`:''}
     ${item.type==='estatico'?`${field('Mensagem principal','mensagem',item.fields?.mensagem)}${field('Legenda','legenda',item.fields?.legenda)}${field('CTA','cta',item.fields?.cta)}`:''}
-    ${item.note?field('Observações','note',item.note):''}
 
     <div class="client-decision-box">
       <label>Decisão deste conteúdo</label>
@@ -418,5 +482,5 @@ function renderClientPortal(){let box=document.getElementById('clientPortal');if
         <button class="btn-dark" onclick="printFullProject()">PDF Projeto completo</button>
         <button class="btn-dark" onclick="printDevelopment()">PDF Desenvolvimento</button>
         <button class="btn-dark" onclick="printCalendar()">PDF Calendário</button>
-      </div></div><div id="projectNav" class="stage"><h2>Projetos disponíveis</h2><p class="muted">Toque em um projeto para visualizar. Os próximos ficam bloqueados até liberação da Humaniza.</p><div class="client-projects">${projects.map(x=>`<div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}<div class="client-project locked-card"><h3>Próximo projeto</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(0)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div><div class="client-project locked-card"><h3>Projeto futuro</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(1)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div></div></div>${p?renderProjectDetail(client,p):'<div class="empty">Nenhum projeto disponível.</div>'}`;setTimeout(()=>document.querySelectorAll('textarea').forEach(t=>autoGrow(t)),0)}
+      </div></div><div id="projectNav" class="stage"><h2>Projetos disponíveis</h2><p class="muted">Toque em um projeto para visualizar. Os próximos ficam bloqueados até liberação da Humaniza.</p><div class="client-projects">${projects.map(x=>`<div class="client-project ${x.id===selectedProjectId?'active':''}" onclick="selectProject('${x.id}')"><h3>${x.period}</h3><div class="pills">${statusPill(x.strategicStatus)}${statusPill(x.productionStatus)}</div><div class="progress"><span style="width:${progress(x)}%"></span></div></div>`).join('')}<div class="client-project locked-card"><h3>Próximo projeto</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(0)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div><div class="client-project locked-card"><h3>Projeto futuro</h3><div class="pills"><span class="pill lock">🔒 ${projectLockedLabel(1)}</span></div><p class="muted">Será liberado pela Humaniza.</p></div></div></div>${p?renderProjectDetail(client,p):'<div class="empty">Nenhum projeto disponível.</div>'}`;setTimeout(()=>{document.querySelectorAll('textarea').forEach(t=>autoGrow(t));enhanceClientCollapsibles();},0)}
 startClientRealtime();
