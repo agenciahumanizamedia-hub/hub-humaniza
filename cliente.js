@@ -327,6 +327,7 @@ function renderContentItem(item){
       <div>
         <h4>${contentTypeName(item.type)}</h4>
         <span class="muted">Status interno: ${pct}% concluído</span>
+        ${(item.note||item.clientNote)?`<div class="pills">${item.note?'<span class="pill yellow">⚠ Observação</span>':''}${item.clientNote?'<span class="pill yellow">⚠ Ajuste registrado</span>':''}</div>`:''}
       </div>
       <div class="pills"><span class="pill ${approvalClass}">${approval}</span></div>
     </div>
@@ -338,12 +339,14 @@ function renderContentItem(item){
     ${item.itemStatus?field('Status do conteúdo','itemStatus',item.itemStatus):''}
 
     ${safeExternalUrl(item.driveLink)?`<div class="content-box"><label>Link do Drive</label><div class="readonly-box"><a href="${escapeHtml(safeExternalUrl(item.driveLink))}" target="_blank" rel="noopener noreferrer">Abrir Drive</a></div></div>`:''}
+    ${safeExternalUrl(item.referenceLink)?`<div class="content-box"><label>Referência do conteúdo</label><div class="readonly-box"><a href="${escapeHtml(safeExternalUrl(item.referenceLink))}" target="_blank" rel="noopener noreferrer">Abrir referência</a></div></div>`:''}
 
     ${field('Tema','tema',item.fields?.tema)}
 
     ${item.type==='roteiro'?`${field('Objetivo','objetivo',item.fields?.objetivo)}${field('Gancho','gancho',item.fields?.gancho)}${field('Desenvolvimento','desenvolvimento',item.fields?.desenvolvimento)}${field('CTA','cta',item.fields?.cta)}`:''}
     ${item.type==='carrossel'?`${field('Objetivo','objetivo',item.fields?.objetivo)}${field('Slides','slides',item.fields?.slides)}${field('Legenda','legenda',item.fields?.legenda)}${field('CTA','cta',item.fields?.cta)}`:''}
     ${item.type==='estatico'?`${field('Mensagem principal','mensagem',item.fields?.mensagem)}${field('Legenda','legenda',item.fields?.legenda)}${field('CTA','cta',item.fields?.cta)}`:''}
+    ${item.note?field('Observações','note',item.note):''}
 
     <div class="client-decision-box">
       <label>Decisão deste conteúdo</label>
